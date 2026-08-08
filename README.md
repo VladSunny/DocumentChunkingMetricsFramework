@@ -1,6 +1,1 @@
 # DocumentChunkingMetricsFramework
-
-## Researched Metrics
-
-### HOPE
-
