@@ -1,5 +1,4 @@
 from .metrics import (
-    block_integrity,
     boundary_clarity,
     contextual_coherence,
     intrachunk_cohesion,
@@ -8,7 +7,6 @@ from .metrics import (
 from .preparation import calculate_embeddings, calculate_perplexity
 
 __all__ = [
-    "block_integrity",
     "boundary_clarity",
     "calculate_embeddings",
     "calculate_perplexity",
