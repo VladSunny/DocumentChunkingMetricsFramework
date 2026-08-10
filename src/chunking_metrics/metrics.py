@@ -4,6 +4,8 @@ from typing import Any
 
 import numpy as np
 
+from .utils import cosine_similarity
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,12 +50,10 @@ def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float:
             return 0.0
 
         centroid = np.mean(chunk_embs, axis=0)
-        centroid_norm = np.linalg.norm(centroid)
-        sentence_norms = np.linalg.norm(chunk_embs, axis=1)
-        if centroid_norm == 0 or np.any(sentence_norms == 0):
+        similarities = cosine_similarity(chunk_embs, centroid)
+        if np.any(np.isnan(similarities)):
             return 0.0
 
-        similarities = chunk_embs @ centroid / (sentence_norms * centroid_norm)
         chunk_cohesions.append(np.mean(similarities))
 
     return float(np.mean(chunk_cohesions))
@@ -75,10 +75,8 @@ def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> fl
         return 0.0
 
     context_emb = np.mean(context_embs, axis=0)
-    chunk_norm = np.linalg.norm(chunk_embs)
-    context_norm = np.linalg.norm(context_emb)
-    if chunk_norm == 0 or context_norm == 0:
+    similarity = cosine_similarity(chunk_embs, context_emb)
+    if np.isnan(similarity):
         return 0.0
 
-    return float(chunk_embs @ context_emb / (chunk_norm * context_norm))
-    
+    return float(similarity)
