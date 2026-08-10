@@ -33,7 +33,27 @@ def test_contextual_coherence() -> None:
 
 
 def test_boundary_clarity() -> None:
-    unc_ppls = np.array([1.0, 2.0, 3.0])
-    cond_ppls = np.array([4.0, 5.0])
+    unc_ppls = np.array([10.0, 8.0, 6.0])
+    cond_ppls = np.array([4.0, 3.0])
     result = boundary_clarity(unc_ppls, cond_ppls)
-    assert result == 0.55
+    assert result == 0.5
+
+
+@pytest.mark.parametrize(
+    ("uncond_ppls", "cond_ppls"),
+    [
+        (np.array([]), np.array([])),
+        (np.array([1.0, 2.0]), np.array([])),
+        (np.array([1.0, 2.0]), np.array([1.0, 2.0])),
+        (np.array([[1.0, 2.0]]), np.array([1.0])),
+        (np.array([1.0, 0.0]), np.array([1.0])),
+        (np.array([1.0, 2.0]), np.array([-1.0])),
+        (np.array([1.0, np.inf]), np.array([1.0])),
+        (np.array([1.0, 2.0]), np.array([np.nan])),
+    ],
+)
+def test_boundary_clarity_returns_zero_for_invalid_inputs(
+    uncond_ppls: np.ndarray,
+    cond_ppls: np.ndarray,
+) -> None:
+    assert boundary_clarity(uncond_ppls, cond_ppls) == 0.0

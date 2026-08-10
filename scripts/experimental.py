@@ -1,15 +1,11 @@
-import logging
+from dotenv import load_dotenv
 
-import numpy as np
+from chunking_metrics import calculate_perplexity
 
-from chunking_metrics import intrachunk_cohesion
+load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG)
-
-embs = [np.array([[1.0, 0.0], [0.0, 1.0]]), np.array([[2.0, 0.0]])]
-
-result = intrachunk_cohesion(embs)
-
-print(np.cos())
-
-print(result, "fgdfd")
+value = calculate_perplexity(
+    "Он подписал договор на следующий день.",
+    device="cpu",
+)
+print(f"perplexity={value:.6f}")

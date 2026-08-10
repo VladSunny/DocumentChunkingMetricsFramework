@@ -313,6 +313,33 @@ $$
 - $PPL(q)$ — perplexity текста $q$ без предыдущего чанка;
 - $PPL(q\mid d)$ — perplexity $q$, когда $d$ дан модели как предыдущий контекст.
 
+Для локального расчёта обеих величин пакет предоставляет `calculate_perplexity`:
+
+```python
+from chunking_metrics import boundary_clarity, calculate_perplexity
+
+previous_chunk = "Иван передал договор Петру."
+next_chunk = "Он подписал его на следующий день."
+
+unconditional_ppl = calculate_perplexity(next_chunk)
+conditional_ppl = calculate_perplexity(next_chunk, context=previous_chunk)
+score = boundary_clarity(
+    uncond_ppls=[calculate_perplexity(previous_chunk), unconditional_ppl],
+    cond_ppls=[conditional_ppl],
+)
+```
+
+По умолчанию используется русскоязычная causal LM
+`ai-forever/rugpt3small_based_on_gpt2`. Можно передать другой Hugging Face model ID
+или путь к локальной модели через `model_name`. При первом вызове модель загружается и
+попадает в Hugging Face cache; последняя использованная модель также переиспользуется внутри
+процесса. `device=None` автоматически выбирает CUDA, затем MPS и CPU, а нужное устройство
+можно задать явно.
+
+Контекст виден модели, но его токены не входят в loss. Между контекстом и целевым текстом
+нормализуется один пробел. Если вся последовательность не помещается в окно модели, старые
+токены контекста отбрасываются с `UserWarning`; сам целевой текст никогда не обрезается.
+
 ## Интерпретация
 
 Если $d$ содержит важный для $q$ контекст, обычно

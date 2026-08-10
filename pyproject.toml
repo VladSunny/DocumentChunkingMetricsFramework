@@ -5,10 +5,19 @@ description = "Document Chunking Metrics Framework"
 readme = "README.md"
 requires-python = ">=3.10"
 
-dependencies = ["numpy>=2.2.6"]
+dependencies = [
+    "numpy>=2.2.6",
+    "torch>=2.4",
+    "transformers>=5,<6",
+]
 
 [dependency-groups]
-dev = ["icecream>=2.2.0", "pytest>=9.1.1", "ruff>=0.16.2"]
+dev = [
+    "icecream>=2.2.0",
+    "pytest>=9.1.1",
+    "python-dotenv>=1.1",
+    "ruff>=0.16.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13"]

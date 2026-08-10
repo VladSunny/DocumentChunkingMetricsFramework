@@ -135,5 +135,15 @@ def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float
     The metric is based on comparing the unconditional perplexity of the next chunk
     and the perplexity of the same text in the presence of the previous chunk in the context.
     """
-    result = np.mean(uncond_ppls[1:] / cond_ppls)
-    return result
+    uncond_ppls = np.asarray(uncond_ppls)
+    cond_ppls = np.asarray(cond_ppls)
+    if uncond_ppls.ndim != 1 or cond_ppls.ndim != 1:
+        return 0.0
+    if cond_ppls.size == 0 or uncond_ppls.size != cond_ppls.size + 1:
+        return 0.0
+    if not np.all(np.isfinite(uncond_ppls)) or not np.all(np.isfinite(cond_ppls)):
+        return 0.0
+    if np.any(uncond_ppls <= 0) or np.any(cond_ppls <= 0):
+        return 0.0
+
+    return float(np.mean(cond_ppls / uncond_ppls[1:]))
