@@ -36,9 +36,9 @@ These metrics are not interchangeable and should normally be considered together
 fixed-size strategy can receive a perfect Size Compliance score while splitting semantic or
 structural dependencies at poor locations.
 
-The package also provides helpers for generating normalized sentence embeddings and causal-language-
-model perplexities. Detailed definitions, formulas, input requirements, and limitations for both
-implemented and planned metrics are available in the
+The package also provides helpers for generating statements, normalized sentence embeddings, and
+causal-language-model perplexities. Detailed definitions, formulas, input requirements, and
+limitations for both implemented and planned metrics are available in the
 [metric plan](docs/chunking_metrics.md).
 
 ## Installation
@@ -146,7 +146,9 @@ from chunking_metrics import (
     boundary_clarity,
     calculate_embeddings,
     calculate_perplexity,
+    concept_unity,
     contextual_coherence,
+    generate_statements,
     intrachunk_cohesion,
 )
 
@@ -164,6 +166,11 @@ chunk_embeddings = calculate_embeddings(chunks)
 icc = intrachunk_cohesion(sentence_embeddings)
 dcc = contextual_coherence(chunk_embeddings[1], chunk_embeddings[[0, 2]])
 
+# HOPE Concept Unity uses statements generated from one chunk.
+statements = generate_statements(chunks[0])
+statement_embeddings = calculate_embeddings(statements)
+cu = concept_unity(statement_embeddings)
+
 # BC expects one unconditional perplexity per chunk and one conditional
 # perplexity for every chunk after the first.
 unconditional = np.array([calculate_perplexity(chunk) for chunk in chunks])
@@ -175,11 +182,18 @@ conditional = np.array(
 )
 bc = boundary_clarity(unconditional, conditional)
 
-print({"intrachunk_cohesion": icc, "contextual_coherence": dcc, "boundary_clarity": bc})
+print(
+    {
+        "intrachunk_cohesion": icc,
+        "contextual_coherence": dcc,
+        "concept_unity": cu,
+        "boundary_clarity": bc,
+    }
+)
 ```
 
 The first invocation of each preparation helper may download its default model. Pass `model_name`
-to either helper to use a different compatible Hugging Face model.
+to a helper to use a different compatible Hugging Face model.
 
 ## Public API
 
@@ -191,6 +205,7 @@ to either helper to use a different compatible Hugging Face model.
 | `intrachunk_cohesion(embs)` | One `(sentence_count, embedding_dim)` matrix per chunk | Mean sentence-to-chunk-centroid cosine similarity |
 | `contextual_coherence(chunk_embs, context_embs)` | One `(embedding_dim,)` chunk vector and an `(item_count, embedding_dim)` context matrix | Cosine similarity between the chunk and mean context vector |
 | `boundary_clarity(uncond_ppls, cond_ppls)` | `K` unconditional and `K - 1` preceding-context-conditioned perplexities | Mean conditional-to-unconditional perplexity ratio |
+| `concept_unity(statements_embs)` | One `(statement_count, embedding_dim)` matrix | Mean clipped pairwise cosine similarity between generated statements |
 
 ### Input preparation
 
@@ -198,21 +213,49 @@ to either helper to use a different compatible Hugging Face model.
 | --- | --- | --- |
 | `calculate_embeddings(texts, model_name=..., device=None, batch_size=32)` | Encode one text or a sequence with a Sentence Transformers model | A normalized `float32` vector or matrix |
 | `calculate_perplexity(text, model_name=..., context=None, device=None)` | Score target text with an optional preceding context excluded from the loss | Causal-language-model perplexity as `float` |
+| `generate_statements(chunk, model_name=..., prompt=..., statement_count=5, temperature=0.7, max_new_tokens=256, device=None)` | Extract an exact number of factual statements from one chunk | A list of `statement_count` non-empty strings |
 
 ## Model and runtime notes
 
-- Embeddings default to `cointegrated/rubert-tiny2`; perplexity defaults to
-  `ai-forever/rugpt3small_based_on_gpt2`. These defaults target Russian-language text; use
-  `model_name` to select compatible models for other languages.
+- Embeddings default to `cointegrated/rubert-tiny2`, perplexity to
+  `ai-forever/rugpt3small_based_on_gpt2`, and statement generation to
+  `Qwen/Qwen2.5-1.5B-Instruct`. These defaults support Russian-language text; use `model_name` to
+  select compatible models for other languages.
 - When `device` is omitted, CUDA is preferred, followed by Apple MPS and CPU. Explicit `cpu`,
   `cuda[:index]`, and `mps` values are supported when available.
 - The most recently loaded embedding model and causal language model are cached for the lifetime of
-  the Python process.
+  the Python process. Perplexity and statement generation share the causal-language-model cache, so
+  switching model identifiers replaces its cached entry.
 - Embedding inputs that exceed the model limit are truncated after a warning. For perplexity,
   excessive preceding context is truncated from the left; a target that cannot fit raises
   `ValueError`.
+- Statement generation is stochastic, performs no retries, and requires a tokenizer with a chat
+  template. The model must return a JSON array containing exactly `statement_count` non-empty
+  strings. Chunks are not truncated; a prompt and response budget that exceed the model context
+  window raise `ValueError`.
+- The default statement prompt is defined in `chunking_metrics.prompts`. Supply a custom format
+  string through `prompt`; it must contain both `{chunk}` and `{statement_count}`. The chunk is
+  substituted as a JSON string, and literal braces in the template must be escaped as `{{` and
+  `}}`:
+
+  ```python
+  custom_prompt = (
+      "Return exactly {statement_count} short claims supported by {chunk} as a JSON array."
+  )
+  statements = generate_statements(chunks[0], prompt=custom_prompt)
+  ```
+
 - Preparation helpers reject invalid arguments with `TypeError` or `ValueError`. Metric functions
   currently return `0.0` for the invalid shapes or ranges that they explicitly validate.
+
+Run the complete Concept Unity pipeline manually with the built-in Russian example:
+
+```bash
+uv run python scripts/concept_unity_smoke_test.py
+```
+
+The first run downloads both generation and embedding models and can take considerably longer than
+the isolated unit tests. The smoke script is intentionally not part of the pytest suite.
 
 ## Development
 

@@ -92,6 +92,49 @@ class FakeEmbeddingModel:
         return np.array([[0.6, 0.8] for _ in texts], dtype=self.embedding_dtype)
 
 
+class FakeStatementTokenizer:
+    eos_token_id = 2
+    pad_token_id = 3
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.messages: list[dict[str, str]] | None = None
+        self.decoded_ids: list[int] | None = None
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        tokenize: bool,
+        add_generation_prompt: bool,
+        return_tensors: str,
+        return_dict: bool,
+    ) -> dict[str, torch.Tensor]:
+        assert tokenize is True
+        assert add_generation_prompt is True
+        assert return_tensors == "pt"
+        assert return_dict is True
+        self.messages = messages
+        return {
+            "input_ids": torch.tensor([[10, 11]], dtype=torch.long),
+            "attention_mask": torch.tensor([[1, 1]], dtype=torch.long),
+        }
+
+    def decode(self, token_ids: torch.Tensor, *, skip_special_tokens: bool) -> str:
+        assert skip_special_tokens is True
+        self.decoded_ids = token_ids.tolist()
+        return self.response
+
+
+class FakeStatementModel:
+    def __init__(self) -> None:
+        self.generation_arguments: dict[str, Any] | None = None
+
+    def generate(self, **kwargs: Any) -> torch.Tensor:
+        self.generation_arguments = kwargs
+        return torch.tensor([[10, 11, 20, 21]], dtype=torch.long)
+
+
 def install_fake_components(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -105,6 +148,258 @@ def install_fake_components(
         lambda model_name, device: (tokenizer, model, max_length),
     )
     return model
+
+
+def test_generate_statements_returns_exact_cleaned_json_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer('[" Первое утверждение. ", "Второе утверждение."]')
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    result = preparation.generate_statements(
+        "Текст чанка.",
+        model_name="model",
+        statement_count=2,
+        temperature=0.5,
+        max_new_tokens=8,
+        device="cpu",
+    )
+
+    assert result == ["Первое утверждение.", "Второе утверждение."]
+    assert tokenizer.decoded_ids == [20, 21]
+    assert tokenizer.messages is not None
+    assert "Текст чанка." in tokenizer.messages[-1]["content"]
+    assert "2" in tokenizer.messages[-1]["content"]
+    assert model.generation_arguments is not None
+    assert model.generation_arguments["do_sample"] is True
+    assert model.generation_arguments["temperature"] == 0.5
+    assert model.generation_arguments["max_new_tokens"] == 8
+
+
+def test_generate_statements_formats_custom_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    result = preparation.generate_statements(
+        "Текст чанка.",
+        model_name="model",
+        prompt="Create {statement_count} claims from {chunk}.",
+        statement_count=2,
+        max_new_tokens=8,
+        device="cpu",
+    )
+
+    assert result == ["Первое.", "Второе."]
+    assert tokenizer.messages is not None
+    assert tokenizer.messages[-1] == {
+        "role": "user",
+        "content": 'Create 2 claims from "Текст чанка.".',
+    }
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("chunk", 123, "chunk must be a string"),
+        ("model_name", 123, "model_name must be a string"),
+        ("prompt", 123, "prompt must be a string"),
+        ("statement_count", 1.5, "statement_count must be an integer"),
+        ("statement_count", True, "statement_count must be an integer"),
+        ("temperature", "hot", "temperature must be a number"),
+        ("temperature", True, "temperature must be a number"),
+        ("max_new_tokens", 1.5, "max_new_tokens must be an integer"),
+        ("max_new_tokens", True, "max_new_tokens must be an integer"),
+        ("device", 123, "device must be a string or None"),
+    ],
+)
+def test_generate_statements_rejects_invalid_argument_types_before_loading_model(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+    arguments: dict[str, object] = {
+        "chunk": "Текст чанка.",
+        "model_name": "model",
+        "statement_count": 2,
+        "temperature": 0.5,
+        "max_new_tokens": 8,
+        "device": "cpu",
+        argument: value,
+    }
+
+    with pytest.raises(TypeError, match=message):
+        preparation.generate_statements(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"chunk": "  "}, "chunk must not be empty"),
+        ({"model_name": "  "}, "model_name must not be empty"),
+        ({"prompt": "  "}, "prompt must not be empty"),
+        (
+            {"prompt": "Generate {statement_count} statements."},
+            r"prompt must contain \{chunk\} and \{statement_count\}",
+        ),
+        (
+            {"prompt": "Generate statements from {chunk}."},
+            r"prompt must contain \{chunk\} and \{statement_count\}",
+        ),
+        (
+            {"prompt": "Generate {statement_count} statements from {chunk}: {unknown}"},
+            "prompt contains an unsupported placeholder: unknown",
+        ),
+        ({"statement_count": 0}, "statement_count must be greater than zero"),
+        ({"statement_count": -1}, "statement_count must be greater than zero"),
+        ({"temperature": 0}, "temperature must be greater than zero"),
+        ({"temperature": -0.1}, "temperature must be greater than zero"),
+        ({"temperature": float("nan")}, "temperature must be finite"),
+        ({"temperature": float("inf")}, "temperature must be finite"),
+        ({"max_new_tokens": 0}, "max_new_tokens must be greater than zero"),
+        ({"max_new_tokens": -1}, "max_new_tokens must be greater than zero"),
+    ],
+)
+def test_generate_statements_rejects_invalid_argument_values_before_loading_model(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+    call_arguments: dict[str, object] = {
+        "chunk": "Текст чанка.",
+        "model_name": "model",
+        "statement_count": 2,
+        "temperature": 0.5,
+        "max_new_tokens": 8,
+        "device": "cpu",
+        **arguments,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        preparation.generate_statements(**call_arguments)  # type: ignore[arg-type]
+
+
+def test_generate_statements_rejects_chunk_that_cannot_fit_without_truncation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 9),
+    )
+
+    with pytest.raises(ValueError, match="do not fit within the model context window"):
+        preparation.generate_statements(
+            "Текст чанка.",
+            model_name="model",
+            statement_count=2,
+            max_new_tokens=8,
+            device="cpu",
+        )
+
+    assert model.generation_arguments is None
+
+
+def test_generate_statements_requires_tokenizer_chat_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
+    model = FakeStatementModel()
+
+    def reject_chat_template(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("Cannot use chat template functions")
+
+    tokenizer.apply_chat_template = reject_chat_template  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    with pytest.raises(ValueError, match="tokenizer must define a chat template"):
+        preparation.generate_statements("Текст чанка.", model_name="model", device="cpu")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "not JSON",
+        '{"statement": "Первое."}',
+        '["Только одно."]',
+        '["Первое.", 2]',
+        '["Первое.", "  "]',
+    ],
+)
+def test_generate_statements_rejects_response_outside_strict_json_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    response: str,
+) -> None:
+    tokenizer = FakeStatementTokenizer(response)
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="model response must be a JSON array of exactly 2 non-empty strings",
+    ):
+        preparation.generate_statements(
+            "Текст чанка.",
+            model_name="model",
+            statement_count=2,
+            max_new_tokens=8,
+            device="cpu",
+        )
+
+
+def test_generate_statements_is_exported_from_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    result = chunking_metrics.generate_statements(
+        "Текст чанка.",
+        model_name="model",
+        statement_count=2,
+        max_new_tokens=8,
+        device="cpu",
+    )
+
+    assert result == ["Первое.", "Второе."]
+    assert chunking_metrics.DEFAULT_STATEMENT_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
 
 
 def test_calculate_embeddings_returns_vector_for_single_text(
