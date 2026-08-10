@@ -2,9 +2,11 @@ import math
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 
+import chunking_metrics
 from chunking_metrics import calculate_perplexity, preparation
 
 
@@ -47,6 +49,49 @@ class FakeModel:
         return SimpleNamespace(loss=torch.tensor(self.loss))
 
 
+class FakeEmbeddingTokenizer:
+    def __call__(
+        self,
+        texts: list[str],
+        *,
+        add_special_tokens: bool,
+        padding: bool,
+        truncation: bool,
+    ) -> dict[str, list[list[int]]]:
+        assert add_special_tokens is True
+        assert padding is False
+        assert truncation is False
+        return {"input_ids": [[0, *range(len(text)), 1] for text in texts]}
+
+
+class FakeEmbeddingModel:
+    def __init__(
+        self,
+        max_seq_length: int = 32,
+        embedding_dtype: np.dtype[Any] | None = None,
+    ) -> None:
+        self.max_seq_length = max_seq_length
+        self.embedding_dtype = embedding_dtype or np.dtype(np.float32)
+        self.tokenizer = FakeEmbeddingTokenizer()
+        self.is_eval = False
+
+    def eval(self) -> "FakeEmbeddingModel":
+        self.is_eval = True
+        return self
+
+    def encode(self, texts: str | list[str], **kwargs: Any) -> np.ndarray:
+        assert kwargs == {
+            "batch_size": 4,
+            "show_progress_bar": False,
+            "convert_to_numpy": True,
+            "normalize_embeddings": True,
+        }
+        if isinstance(texts, str):
+            return np.array([0.6, 0.8], dtype=self.embedding_dtype)
+        assert isinstance(texts, list)
+        return np.array([[0.6, 0.8] for _ in texts], dtype=self.embedding_dtype)
+
+
 def install_fake_components(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -60,6 +105,187 @@ def install_fake_components(
         lambda model_name, device: (tokenizer, model, max_length),
     )
     return model
+
+
+def test_calculate_embeddings_returns_vector_for_single_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: model,
+        raising=False,
+    )
+
+    result = preparation.calculate_embeddings(
+        "text",
+        model_name="model",
+        device="cpu",
+        batch_size=4,
+    )
+
+    np.testing.assert_array_equal(result, np.array([0.6, 0.8], dtype=np.float32))
+
+
+def test_calculate_embeddings_returns_float32_matrix_for_text_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel(embedding_dtype=np.dtype(np.float64))
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: model,
+        raising=False,
+    )
+
+    result = preparation.calculate_embeddings(
+        ("first", "second"),
+        model_name="model",
+        device="cpu",
+        batch_size=4,
+    )
+
+    assert result.shape == (2, 2)
+    assert result.dtype == np.float32
+
+
+def test_embedding_model_loader_caches_model_and_enables_eval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel()
+    loads: list[tuple[str, str]] = []
+
+    def load_model(model_name: str, *, device: str) -> FakeEmbeddingModel:
+        loads.append((model_name, device))
+        return model
+
+    monkeypatch.setattr(preparation, "SentenceTransformer", load_model, raising=False)
+    preparation._load_embedding_model.cache_clear()
+
+    first = preparation._load_embedding_model("model", "cpu")
+    second = preparation._load_embedding_model("model", "cpu")
+
+    assert first is second
+    assert loads == [("model", "cpu")]
+    assert model.is_eval
+    preparation._load_embedding_model.cache_clear()
+
+
+def test_calculate_embeddings_rejects_empty_text_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+
+    with pytest.raises(ValueError, match="texts must not be empty"):
+        preparation.calculate_embeddings([], device="cpu")
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("texts", 123, "texts must be a string or a sequence of strings"),
+        ("texts", ["text", 123], r"texts\[1\] must be a string"),
+        ("model_name", 123, "model_name must be a string"),
+        ("device", 123, "device must be a string or None"),
+        ("batch_size", 1.5, "batch_size must be an integer"),
+        ("batch_size", True, "batch_size must be an integer"),
+    ],
+)
+def test_calculate_embeddings_rejects_invalid_argument_types(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+    arguments: dict[str, object] = {
+        "texts": "text",
+        "model_name": "model",
+        "device": "cpu",
+        "batch_size": 4,
+        argument: value,
+    }
+
+    with pytest.raises(TypeError, match=message):
+        preparation.calculate_embeddings(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"texts": "  "}, r"texts\[0\] must not be empty"),
+        ({"texts": ["text", "\t"]}, r"texts\[1\] must not be empty"),
+        ({"texts": "text", "model_name": "  "}, "model_name must not be empty"),
+        ({"texts": "text", "batch_size": 0}, "batch_size must be greater than zero"),
+        ({"texts": "text", "batch_size": -1}, "batch_size must be greater than zero"),
+    ],
+)
+def test_calculate_embeddings_rejects_invalid_argument_values(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        preparation.calculate_embeddings(**arguments, device="cpu")  # type: ignore[arg-type]
+
+
+def test_calculate_embeddings_warns_when_texts_are_truncated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel(max_seq_length=5)
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: model,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match="2 texts exceed the model limit of 5 tokens and will be truncated",
+    ):
+        result = preparation.calculate_embeddings(
+            ["abcd", "x", "abcdef"],
+            model_name="model",
+            device="cpu",
+            batch_size=4,
+        )
+
+    assert result.shape == (3, 2)
+
+
+def test_calculate_embeddings_is_exported_from_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_embedding_model",
+        lambda model_name, device: model,
+    )
+
+    result = chunking_metrics.calculate_embeddings(
+        "text",
+        model_name="model",
+        device="cpu",
+        batch_size=4,
+    )
+
+    assert result.shape == (2,)
 
 
 def test_calculate_perplexity_rejects_empty_text() -> None:

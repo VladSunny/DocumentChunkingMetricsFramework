@@ -1,10 +1,14 @@
 import warnings
+from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any
+from typing import Any, overload
 
+import numpy as np
 import torch
+from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+DEFAULT_EMBEDDING_MODEL = "cointegrated/rubert-tiny2"
 DEFAULT_PERPLEXITY_MODEL = "ai-forever/rugpt3small_based_on_gpt2"
 
 _IGNORED_LABEL = -100
@@ -56,6 +60,64 @@ def _load_model_and_tokenizer(model_name: str, device: str) -> tuple[Any, Any, i
     model = model.to(device)
     model.eval()
     return tokenizer, model, _model_max_length(tokenizer, model)
+
+
+@lru_cache(maxsize=1)
+def _load_embedding_model(model_name: str, device: str) -> SentenceTransformer:
+    model = SentenceTransformer(model_name, device=device)
+    model.eval()
+    return model
+
+
+def _warn_about_embedding_truncation(texts: list[str], model: Any) -> None:
+    max_length = model.max_seq_length
+    if not isinstance(max_length, int) or max_length <= 0:
+        return
+
+    tokenized = model.tokenizer(
+        texts,
+        add_special_tokens=True,
+        padding=False,
+        truncation=False,
+    )
+    truncated_count = sum(len(input_ids) > max_length for input_ids in tokenized["input_ids"])
+    if truncated_count:
+        noun = "text exceeds" if truncated_count == 1 else "texts exceed"
+        warnings.warn(
+            f"{truncated_count} {noun} the model limit of {max_length} tokens "
+            "and will be truncated",
+            UserWarning,
+            stacklevel=2,
+        )
+
+
+def _validate_embedding_arguments(
+    texts: str | Sequence[str],
+    model_name: str,
+    device: str | None,
+    batch_size: int,
+) -> list[str]:
+    if not isinstance(texts, (str, Sequence)):
+        raise TypeError("texts must be a string or a sequence of strings")
+    text_items = [texts] if isinstance(texts, str) else list(texts)
+    if not text_items:
+        raise ValueError("texts must not be empty")
+    for index, text in enumerate(text_items):
+        if not isinstance(text, str):
+            raise TypeError(f"texts[{index}] must be a string")
+        if not text.strip():
+            raise ValueError(f"texts[{index}] must not be empty")
+    if not isinstance(model_name, str):
+        raise TypeError("model_name must be a string")
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
+    if device is not None and not isinstance(device, str):
+        raise TypeError("device must be a string or None")
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool):
+        raise TypeError("batch_size must be an integer")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+    return text_items
 
 
 def _prefix_token_id(tokenizer: Any, model: Any) -> int:
@@ -158,3 +220,68 @@ def calculate_perplexity(
     if output.loss is None:
         raise ValueError("the causal language model did not return a loss")
     return float(torch.exp(output.loss.detach()).cpu().item())
+
+
+@overload
+def calculate_embeddings(
+    texts: str,
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+    *,
+    device: str | None = None,
+    batch_size: int = 32,
+) -> np.ndarray: ...
+
+
+@overload
+def calculate_embeddings(
+    texts: Sequence[str],
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+    *,
+    device: str | None = None,
+    batch_size: int = 32,
+) -> np.ndarray: ...
+
+
+def calculate_embeddings(
+    texts: str | Sequence[str],
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+    *,
+    device: str | None = None,
+    batch_size: int = 32,
+) -> np.ndarray:
+    """Calculate normalized sentence embeddings for one or more texts.
+
+    Args:
+        texts: A text or sequence of texts to embed. Texts must contain non-whitespace
+            characters.
+        model_name: Hugging Face Sentence Transformers model identifier or local model path.
+        device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
+            CUDA is preferred, followed by MPS and CPU.
+        batch_size: Number of texts encoded in one inference batch.
+
+    Returns:
+        A float32 NumPy vector of shape ``(embedding_dim,)`` for one text, or a matrix
+        of shape ``(text_count, embedding_dim)`` for a sequence. Every vector is L2-normalized.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument is empty or ``batch_size`` is not positive.
+
+    Texts longer than the model's maximum sequence length are truncated by Sentence
+    Transformers after this function emits a warning.
+    """
+    text_items = _validate_embedding_arguments(texts, model_name, device, batch_size)
+    resolved_device = _resolve_device(device)
+    model = _load_embedding_model(model_name.strip(), resolved_device)
+    _warn_about_embedding_truncation(text_items, model)
+    encode_input = texts if isinstance(texts, str) else text_items
+    return np.asarray(
+        model.encode(
+            encode_input,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        ),
+        dtype=np.float32,
+    )

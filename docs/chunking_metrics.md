@@ -26,6 +26,34 @@
 | **HOPE Information Preservation** | сохранение исходной информации | document + chunks + LLM + retrieval | да | document-level |
 | **HOPE aggregate** | совокупную HOPE-оценку | три компоненты HOPE | да | composite |
 
+## Подготовка embeddings
+
+Пакет предоставляет `calculate_embeddings` для локального получения нормализованных
+sentence embeddings через модели Hugging Face. По умолчанию используется компактная
+`cointegrated/rubert-tiny2`; при первом вызове модель скачивается и затем переиспользуется
+из локального кэша.
+
+```python
+from chunking_metrics import (
+    calculate_embeddings,
+    contextual_coherence,
+    intrachunk_cohesion,
+)
+
+sentences = ["Первое предложение.", "Связанное с ним второе предложение."]
+sentence_embs = calculate_embeddings(sentences)
+cohesion = intrachunk_cohesion([sentence_embs])
+
+chunk_emb = calculate_embeddings("Текст оцениваемого чанка.")
+context_embs = calculate_embeddings(["Левый контекст.", "Правый контекст."])
+coherence = contextual_coherence(chunk_emb, context_embs)
+```
+
+Одиночная строка даёт вектор формы `(embedding_dim,)`, а последовательность строк —
+матрицу `(text_count, embedding_dim)`. Модель можно заменить через `model_name`, устройство —
+через `device`, а размер inference-батча — через `batch_size`. Тексты длиннее контекстного
+окна модели обрезаются с `UserWarning`.
+
 ---
 
 # 1. Size Compliance (SC)
