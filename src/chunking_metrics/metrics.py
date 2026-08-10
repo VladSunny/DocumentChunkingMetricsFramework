@@ -30,10 +30,17 @@ def size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> flo
 
 def block_integrity(*args: Any, **kwargs: Any) -> None:
     """Not implemented yet
-    Block Integrity evaluates how much the boundaries of chunks preserve the natural structure of the document.
-    The structural blocks can be paragraphs, lists, tables, code blocks, quotations, figure captions, and other elements that can be automatically selected when parsing a document.
-    The basic intuition is simple: if a table, list, or linked paragraph is split between several chunks, part of the local context may be lost during retrieval.
-    At the same time, the same gap has different significance for different types of structure: cutting a table is usually more dangerous than a long paragraph.
+    Block Integrity evaluates how much the boundaries of chunks
+    preserve the natural structure of the document.
+    The structural blocks can be paragraphs, lists, tables, code blocks, quotations,
+    and other elements that can be automatically selected when parsing a document.
+
+    The basic intuition is simple:
+    if a table, list, or linked paragraph is split between several chunks,
+    part of the local context may be lost during retrieval.
+
+    At the same time, the same gap has different significance for different types of structure:
+    cutting a table is usually more dangerous than a long paragraph.
     """
     del args, kwargs
     raise NotImplementedError("Not implemented yet")
@@ -65,10 +72,18 @@ def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float:
 
 
 def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float:
-    """Contextual Coherence evaluates how consistent a chunk is with the local context from which it was extracted.
-    Unlike the ICC, this metric does not look inside the chunk, but at its relation to the surrounding text of the document.
-    A typical scheme is to compare the embedding of a chunk with the embedding of a context window around it.
-    The context can be adjacent sentences, paragraphs, or a fixed number of tokens before and after the chunk.
+    """Contextual Coherence evaluates how consistent
+    a chunk is with the local context from which it was extracted.
+
+    Unlike the ICC, this metric does not look inside the chunk,
+    but at its relation to the surrounding text of the document.
+
+    A typical scheme is to compare the embedding
+    of a chunk with the embedding of a context window around it.
+
+    The context can be adjacent sentences, paragraphs,
+    or a fixed number of tokens before and after the chunk.
+
     - chunk_embs -> array (emb dims)
     - context_embs -> array (context blocks, emb dims)
     """
@@ -89,7 +104,8 @@ def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> fl
 
 def coreference_integrity(*args: Any, **kwargs: Any) -> None:
     """Not implemented yet
-    Coreference Integrity measures how much the boundaries of chunks break the relationship between expressions that refer to the same entity.
+    Coreference Integrity measures how much the boundaries of chunks
+    break the relationship between expressions that refer to the same entity.
 
     For example:
 
@@ -101,14 +117,23 @@ def coreference_integrity(*args: Any, **kwargs: Any) -> None:
 
     In the second chunk, the pronouns "he" and "his" require information from the first.
     If only the second chunk is found during retrieval, its interpretation will become ambiguous.
-    Coreference resolver builds chains of mentions of a single entity, after which you can check which connections pass through the boundaries of chunks.
+
+    Coreference resolver builds chains of mentions of a single entity,
+    after which you can check which connections pass through the boundaries of chunks.
     """
     del args, kwargs
     raise NotImplementedError("Not implemented yet")
 
-def boundary_clarity() -> float:
-    """Boundary Clarity evaluates how independent two neighboring chunks are from the point of view of the causal language model.
-    If the previous chunk makes it much easier for the language model to predict the next one, this indicates a strong relationship between them and a potentially weak boundary.
-    The metric is based on comparing the unconditional perplexity of the next chunk and the perplexity of the same text in the presence of the previous chunk in the context.
+
+def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> float:
+    """Boundary Clarity evaluates how independent two neighboring chunks are
+    from the point of view of the causal language model.
+
+    If the previous chunk makes it much easier for the language model to predict the next one,
+    this indicates a strong relationship between them and a potentially weak boundary.
+
+    The metric is based on comparing the unconditional perplexity of the next chunk
+    and the perplexity of the same text in the presence of the previous chunk in the context.
     """
-    pass
+    result = np.mean(uncond_ppls[1:] / cond_ppls)
+    return result

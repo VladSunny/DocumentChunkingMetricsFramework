@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from chunking_metrics import contextual_coherence, intrachunk_cohesion, size_compliance
+from chunking_metrics import (
+    boundary_clarity,
+    contextual_coherence,
+    intrachunk_cohesion,
+    size_compliance,
+)
 
 
 def test_size_compliance() -> None:
@@ -25,3 +30,10 @@ def test_contextual_coherence() -> None:
     context_embs = np.array([[1.0, 0.0], [0.0, 1.0]])
     result = contextual_coherence(chunk_embs, context_embs)
     assert result == pytest.approx(1 / np.sqrt(2))
+
+
+def test_boundary_clarity() -> None:
+    unc_ppls = np.array([1.0, 2.0, 3.0])
+    cond_ppls = np.array([4.0, 5.0])
+    result = boundary_clarity(unc_ppls, cond_ppls)
+    assert result == 0.55
