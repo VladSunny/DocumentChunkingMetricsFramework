@@ -147,3 +147,14 @@ def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float
         return 0.0
 
     return float(np.mean(cond_ppls / uncond_ppls[1:]))
+
+
+def chunk_score(*args: Any, **kwargs: Any) -> None:
+    """ChunkScore is a reference-free composite metric that combines two properties of a set of chunks:
+    Logical Independence (LI) — to what extent chunks are logically independent from each other;
+    Semantic Dispersion (SD) — how semantically diverse a set of chunks is and does not consist of almost duplicate fragments.
+    General form:
+        ChunkScore = lambda * LI + (1 - lambda) * S * D
+    """
+    del args, kwargs
+    raise NotImplementedError("Not implemented yet")
