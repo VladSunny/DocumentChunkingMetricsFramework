@@ -38,4 +38,22 @@ def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float:
     - embs -> array (chunks, sentences, emb dims)
     """
 
-    return 0.0
+    embs = list(embs)
+    if len(embs) <= 0:
+        return 0.0
+
+    chunk_cohesions = []
+    for chunk_embs in embs:
+        if chunk_embs.ndim != 2 or chunk_embs.shape[0] <= 0:
+            return 0.0
+
+        centroid = np.mean(chunk_embs, axis=0)
+        centroid_norm = np.linalg.norm(centroid)
+        sentence_norms = np.linalg.norm(chunk_embs, axis=1)
+        if centroid_norm == 0 or np.any(sentence_norms == 0):
+            return 0.0
+
+        similarities = chunk_embs @ centroid / (sentence_norms * centroid_norm)
+        chunk_cohesions.append(np.mean(similarities))
+
+    return float(np.mean(chunk_cohesions))
