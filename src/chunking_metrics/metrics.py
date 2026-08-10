@@ -160,3 +160,37 @@ def chunk_score(*args: Any, **kwargs: Any) -> None:
     """
     del args, kwargs
     raise NotImplementedError("Not implemented yet")
+
+
+def concept_unity(statements_embs: np.ndarray) -> float:
+    """Evaluate the semantic unity of the statements generated from one chunk.
+
+    Args:
+        statements_embs: Statement embeddings with shape ``(statements, embedding_dims)``.
+
+    Returns:
+        The mean pairwise cosine similarity with negative similarities clipped to zero.
+        Invalid or empty arrays produce ``0.0``.
+    """
+    if statements_embs.ndim != 2 or min(statements_embs.shape) <= 0:
+        return 0.0
+    if not np.issubdtype(statements_embs.dtype, np.number) or np.iscomplexobj(statements_embs):
+        return 0.0
+    if not np.all(np.isfinite(statements_embs)):
+        return 0.0
+
+    floating_dtype = np.result_type(statements_embs.dtype, np.float64)
+    floating_embs = statements_embs.astype(floating_dtype, copy=False)
+    scales = np.max(np.abs(floating_embs), axis=1, keepdims=True)
+    if np.any(scales == 0):
+        return 0.0
+    scaled_embs = floating_embs / scales
+
+    similarities = cosine_similarity(
+        scaled_embs[:, np.newaxis, :],
+        scaled_embs[np.newaxis, :, :],
+    )
+    if not np.all(np.isfinite(similarities)):
+        return 0.0
+
+    return float(np.mean(np.clip(similarities, 0.0, 1.0)))

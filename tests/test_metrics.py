@@ -1,12 +1,14 @@
 import numpy as np
 import pytest
 
+import chunking_metrics
 from chunking_metrics import (
     boundary_clarity,
     contextual_coherence,
     intrachunk_cohesion,
     size_compliance,
 )
+from chunking_metrics.metrics import concept_unity
 
 
 def test_size_compliance() -> None:
@@ -57,3 +59,50 @@ def test_boundary_clarity_returns_zero_for_invalid_inputs(
     cond_ppls: np.ndarray,
 ) -> None:
     assert boundary_clarity(uncond_ppls, cond_ppls) == 0.0
+
+
+def test_concept_unity_averages_clipped_pairwise_similarities() -> None:
+    statements_embs = np.array([[1.0, 0.0], [-1.0, 0.0]])
+
+    assert concept_unity(statements_embs) == pytest.approx(0.5)
+
+
+def test_concept_unity_returns_one_for_single_statement() -> None:
+    statements_embs = np.array([[3.0, 4.0]])
+
+    assert concept_unity(statements_embs) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "statements_embs",
+    [
+        np.array([[255, 0]], dtype=np.uint8),
+        np.array([[60_000, 0]], dtype=np.float16),
+        np.array([[1e308, 1e308]]),
+    ],
+)
+def test_concept_unity_avoids_numeric_overflow(statements_embs: np.ndarray) -> None:
+    assert concept_unity(statements_embs) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "statements_embs",
+    [
+        np.array([]),
+        np.empty((0, 2)),
+        np.empty((2, 0)),
+        np.ones((1, 1, 1)),
+        np.array([[0.0, 0.0]]),
+        np.array([[np.nan, 1.0]]),
+        np.array([[np.inf, 1.0]]),
+        np.array([["not", "numeric"]]),
+    ],
+)
+def test_concept_unity_returns_zero_for_invalid_inputs(
+    statements_embs: np.ndarray,
+) -> None:
+    assert concept_unity(statements_embs) == 0.0
+
+
+def test_concept_unity_is_part_of_public_api() -> None:
+    assert chunking_metrics.concept_unity is concept_unity

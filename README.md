@@ -6,7 +6,7 @@ reference chunks, annotated questions, or human relevance labels.
 
 ## Metric implementation status
 
-Four of the eleven metrics in the project plan are currently implemented:
+Five of the eleven metrics in the project plan are currently implemented:
 
 - [x] [Size Compliance (SC)](docs/chunking_metrics.md#1-size-compliance-sc) — `size_compliance`
 - [ ] [Block Integrity (BI)](docs/chunking_metrics.md#2-block-integrity-bi)
@@ -15,7 +15,7 @@ Four of the eleven metrics in the project plan are currently implemented:
 - [ ] [Coreference Integrity (RC)](docs/chunking_metrics.md#5-coreference-integrity-rc)
 - [x] [Boundary Clarity (BC)](docs/chunking_metrics.md#6-boundary-clarity-bc) — `boundary_clarity`
 - [ ] [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
-- [ ] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity)
+- [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity) — `concept_unity`
 - [ ] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
 - [ ] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
 - [ ] [HOPE Aggregate](docs/chunking_metrics.md#11-hope-aggregate)
