@@ -25,15 +25,15 @@
 
 | Символ | Значение |
 |---|---|
-| \(n\) | число атомарных единиц, обычно предложений или абзацев |
-| \(K\) | число чанков |
-| \(B_g, B_p\) | число эталонных и предсказанных границ |
-| \(d\) | размерность embedding |
-| \(Q\) | число оценочных запросов |
-| \(R\) | суммарное число токенов в retrieved chunks |
-| \(s\) | число синтетических утверждений или вопросов на чанк |
-| \(L_{\text{enc}}(T)\) | стоимость прохода embedding-модели по \(T\) токенам |
-| \(L_{\text{LM}}(T)\) | стоимость прохода causal LM или LLM по \(T\) токенам |
+| $n$ | число атомарных единиц, обычно предложений или абзацев |
+| $K$ | число чанков |
+| $B_g, B_p$ | число эталонных и предсказанных границ |
+| $d$ | размерность embedding |
+| $Q$ | число оценочных запросов |
+| $R$ | суммарное число токенов в retrieved chunks |
+| $s$ | число синтетических утверждений или вопросов на чанк |
+| $L_{\text{enc}}(T)$ | стоимость прохода embedding-модели по $T$ токенам |
+| $L_{\text{LM}}(T)$ | стоимость прохода causal LM или LLM по $T$ токенам |
 
 Оценки времени далее являются **инженерными порядками величины**, а не результатами единого опубликованного benchmark. Предполагается документ на 1 000 токенов, примерно 40–70 предложений и 4–10 чанков; прогретый Python-процесс; современный ноутбучный CPU; для embeddings — небольшая локальная sentence-encoder-модель; для perplexity — causal LM порядка 1,5–7B на одной потребительской GPU; для удалённой LLM — задержка порядка 1–3 секунд на запрос с возможностью батчинга. На холодном старте, CPU-only inference или при последовательных API-вызовах время может быть на порядок выше.
 
@@ -54,7 +54,7 @@ flowchart LR
     F -. Answer correctness, faithfulness .-> F
 ```
 
-Метрики в левой части лучше локализуют ошибку chunker, но хуже предсказывают конечный RAG. Метрики справа ближе к пользовательской ценности, однако сильнее зависят от retriever, embeddings, top‑\(k\), генератора и состава запросов. Именно поэтому Chroma перешёл от обычных document-level IR-показателей к token-level учёту evidence, а HOPE и ChunkScore пытаются оценивать чанки непосредственно, не выполняя полный downstream-пайплайн.
+Метрики в левой части лучше локализуют ошибку chunker, но хуже предсказывают конечный RAG. Метрики справа ближе к пользовательской ценности, однако сильнее зависят от retriever, embeddings, top‑$k$, генератора и состава запросов. Именно поэтому Chroma перешёл от обычных document-level IR-показателей к token-level учёту evidence, а HOPE и ChunkScore пытаются оценивать чанки непосредственно, не выполняя полный downstream-пайплайн.
 
 ## Каталог метрик
 
@@ -62,11 +62,11 @@ flowchart LR
 
 | Метрика | Определение, интуиция и выход | Входы и ресурсы | Сложность и оценка времени для 1k токенов | Сильные и слабые стороны; зависимость от домена |
 |---|---|---|---|---|
-| **Exact / tolerant Boundary Precision, Recall, F1** | Граница считается правильной, если её позиция совпадает с эталонной. В tolerant-варианте допускается отклонение до \(\delta\) атомарных единиц и выполняется взаимно-однозначное сопоставление. \(P=M/B_p\), \(R=M/B_g\), \(F_1=2PR/(P+R)\). Выход: \(0\ldots1\), выше лучше. | Эталонные и предсказанные позиции границ; модели не нужны. | Для отсортированных границ \(O(B_g+B_p)\) времени и \(O(B_g+B_p)\) памяти; обычно **менее 1 мс**. | Максимально интерпретируемая метрика, удобна для hierarchical levels. Exact F1 чрезмерно наказывает почти правильные границы; tolerant F1 зависит от выбранного \(\delta\). Низкая зависимость от языка, но высокая зависимость от annotation policy. HiCBench использует chunk-point F1 на нескольких иерархических уровнях. |
-| **\(P_k\)** | Окно длины \(k\) скользит по документу. Для каждой пары позиций \(i,i+k\) проверяется, одинаково ли reference и hypothesis решают, принадлежат ли позиции одному сегменту. \(P_k\) — доля несовпадений; ниже лучше. Обычно \(k\) равно половине средней длины эталонного сегмента. | Две бинарные последовательности границ; gold segmentation обязательна. | С prefix sums или segment IDs — \(O(n)\) времени и \(O(n)\) памяти, возможен streaming \(O(1)\); **менее 1–2 мс**. | Дёшев и исторически широко использовался. Известные недостатки: асимметричное наказание false negative/false positive, сильный штраф за near miss и чувствительность к распределению длины сегментов. |
-| **WindowDiff** | В каждом окне сравнивается **число** reference- и predicted-границ. Ошибка начисляется, если числа различаются: \(\mathrm{WD}=\frac{1}{n-k}\sum_i[\lvert b_g(i,i+k)-b_p(i,i+k)\rvert>0]\). Ниже лучше. Weighted-вариант использует величину разницы. | Gold и predicted segmentation; параметр окна \(k\). | \(O(n)\) с prefix sums, \(O(n)\) или \(O(1)\) памяти; **менее 1–2 мс**. | Исправляет часть асимметрий \(P_k\), но результат всё ещё зависит от \(k\), краёв документа и средней длины сегмента. Не измеряет семантическую полезность границ для RAG. |
-| **Segmentation Similarity \(S\)** | Сегментация преобразуется в эталон операциями вставки, удаления и сдвига границ. Нормализованная стоимость преобразования превращается в similarity \(0\ldots1\); выше лучше. | Две сегментации и стоимости edit operations. | Типичная динамическая программа: \(O(B_gB_p)\) времени, \(O(B_gB_p)\) памяти; память можно сократить до \(O(\min(B_g,B_p))\). Для короткого документа обычно **1–10 мс**. | Даёт частичный credit за почти правильные границы и лучше отражает степень несогласия, чем exact F1. Результат зависит от настроек стоимости сдвига и операций. |
-| **Boundary Edit Distance и Boundary Similarity \(B\)** | BED сопоставляет границы через match, insertion, deletion и near-boundary transposition/shift. Boundary Similarity нормализует edit cost; BED-confusion matrix позволяет получить boundary precision, recall и F1 с учётом near misses. | Gold и predicted boundaries; настройки допустимого сдвига и его стоимости. | Обычно \(O(B_gB_p)\); **1–20 мс** для 1k токенов. | Наиболее диагностичная классическая семья: различает точное совпадение, близкую границу, пропуск и лишнюю границу. Всё ещё требует эталона и не различает семантически важные и малозначимые boundaries. Реализована в SegEval. |
+| **Exact / tolerant Boundary Precision, Recall, F1** | Граница считается правильной, если её позиция совпадает с эталонной. В tolerant-варианте допускается отклонение до $\delta$ атомарных единиц и выполняется взаимно-однозначное сопоставление. $P=M/B_p$, $R=M/B_g$, $F_1=2PR/(P+R)$. Выход: $0\ldots1$, выше лучше. | Эталонные и предсказанные позиции границ; модели не нужны. | Для отсортированных границ $O(B_g+B_p)$ времени и $O(B_g+B_p)$ памяти; обычно **менее 1 мс**. | Максимально интерпретируемая метрика, удобна для hierarchical levels. Exact F1 чрезмерно наказывает почти правильные границы; tolerant F1 зависит от выбранного $\delta$. Низкая зависимость от языка, но высокая зависимость от annotation policy. HiCBench использует chunk-point F1 на нескольких иерархических уровнях. |
+| **$P_k$** | Окно длины $k$ скользит по документу. Для каждой пары позиций $i,i+k$ проверяется, одинаково ли reference и hypothesis решают, принадлежат ли позиции одному сегменту. $P_k$ — доля несовпадений; ниже лучше. Обычно $k$ равно половине средней длины эталонного сегмента. | Две бинарные последовательности границ; gold segmentation обязательна. | С prefix sums или segment IDs — $O(n)$ времени и $O(n)$ памяти, возможен streaming $O(1)$; **менее 1–2 мс**. | Дёшев и исторически широко использовался. Известные недостатки: асимметричное наказание false negative/false positive, сильный штраф за near miss и чувствительность к распределению длины сегментов. |
+| **WindowDiff** | В каждом окне сравнивается **число** reference- и predicted-границ. Ошибка начисляется, если числа различаются: $\mathrm{WD}=\frac{1}{n-k}\sum_i[\lvert b_g(i,i+k)-b_p(i,i+k)\rvert>0]$. Ниже лучше. Weighted-вариант использует величину разницы. | Gold и predicted segmentation; параметр окна $k$. | $O(n)$ с prefix sums, $O(n)$ или $O(1)$ памяти; **менее 1–2 мс**. | Исправляет часть асимметрий $P_k$, но результат всё ещё зависит от $k$, краёв документа и средней длины сегмента. Не измеряет семантическую полезность границ для RAG. |
+| **Segmentation Similarity $S$** | Сегментация преобразуется в эталон операциями вставки, удаления и сдвига границ. Нормализованная стоимость преобразования превращается в similarity $0\ldots1$; выше лучше. | Две сегментации и стоимости edit operations. | Типичная динамическая программа: $O(B_gB_p)$ времени, $O(B_gB_p)$ памяти; память можно сократить до $O(\min(B_g,B_p))$. Для короткого документа обычно **1–10 мс**. | Даёт частичный credit за почти правильные границы и лучше отражает степень несогласия, чем exact F1. Результат зависит от настроек стоимости сдвига и операций. |
+| **Boundary Edit Distance и Boundary Similarity $B$** | BED сопоставляет границы через match, insertion, deletion и near-boundary transposition/shift. Boundary Similarity нормализует edit cost; BED-confusion matrix позволяет получить boundary precision, recall и F1 с учётом near misses. | Gold и predicted boundaries; настройки допустимого сдвига и его стоимости. | Обычно $O(B_gB_p)$; **1–20 мс** для 1k токенов. | Наиболее диагностичная классическая семья: различает точное совпадение, близкую границу, пропуск и лишнюю границу. Всё ещё требует эталона и не различает семантически важные и малозначимые boundaries. Реализована в SegEval. |
 
 Классические метрики полезны, когда chunking моделируется как задача **восстановления заданной разметки**. Однако для RAG валидных разбиений может быть несколько: одна система может использовать короткие retrieval chunks, другая — иерархические parent/child fragments, и обе могут успешно отвечать на вопросы. Поэтому высокое совпадение с одной human segmentation не гарантирует оптимального retrieval.
 
@@ -74,23 +74,23 @@ flowchart LR
 
 | Метрика или семейство | Определение и интуиция | Вход → выход | Сложность, ресурсы и runtime | Сильные стороны, ограничения и доменная зависимость |
 |---|---|---|---|---|
-| **Chroma token Precision, Recall, IoU и Precision\(_\Omega\)** | Пусть \(t_e\) — токены gold evidence, а \(t_r\) — токены retrieved chunks. \(\mathrm{Precision}=|t_e\cap t_r|/|t_r|\), \(\mathrm{Recall}=|t_e\cap t_r|/|t_e|\), \(\mathrm{IoU}=|t_e\cap t_r|/|t_e\cup t_r|\). Лишние и дублирующиеся retrieved tokens понижают эффективность. Precision\(_\Omega\) оценивает oracle-набор чанков, необходимый для покрытия evidence, и тем самым сильнее изолирует эффект самих границ. | Документы, chunks, запросы, evidence spans, retriever → значения \(0\ldots1\) по запросам и агрегаты. Evidence может быть human-labeled или синтетическим. | Индексация \(O(KL_{\text{enc}})\); на запрос — retrieval плюс \(O(R)\) token accounting. С готовыми evidence и индексом: **0,05–0,5 с**. С LLM-генерацией запросов/evidence: **3–30 с**. | Очень хорошо измеряет information preservation, retrieval recall и лишний контекст. Чувствительна к query distribution, top‑\(k\), embedding-модели и качеству synthetic questions. В отчёте Chroma стратегия chunking меняла recall до девяти процентных пунктов; авторы отдельно отмечают ограниченное разнообразие синтетических вопросов. |
-| **Adaptive Chunking intrinsic suite** | **SC:** доля чанков в целевом диапазоне токенов. **ICC:** сходство предложений с embedding всего чанка. **DCC:** сходство чанка с окружающим context window. **BI:** доля абзацев, списков, таблиц и иных structural blocks, не разрезанных границей. **RC:** доля coreference-связей entity–pronoun, не разорванных между чанками. | Документ, chunks, token bounds, структурная разметка, embeddings и опциональная coreference-модель → пять scores и агрегат. Gold QA не нужна. | SC/BI: \(O(n)\), **1–20 мс**. ICC/DCC: \(O(L_{\text{enc}}(T)+nd)\), **0,05–0,5 с**. RC: зависит от coreference model, ориентировочно **0,2–3 с**. | Практичный и хорошо диагностируемый набор. Покрывает cohesion, structure, size и локальную independence через coreference. DCC может вознаграждать тематическую непрерывность, но не обязательно самодостаточность; RC зависит от качества coreference resolver и языка. Официальная реализация опубликована вместе с работой Adaptive Chunking. |
-| **MoC Boundary Clarity \(BC\)** | Для соседних чанков \(d,q\): \(\mathrm{BC}(q,d)=\mathrm{PPL}(q\mid d)/\mathrm{PPL}(q)\). Если предыдущий чанк сильно помогает предсказывать следующий, между ними остаётся зависимость и граница недостаточно ясна; отношение ближе к единице интерпретируется как более независимая граница. | Последовательность chunks и causal LM с token log-probabilities → score по каждой границе и среднее. Gold и генеративные API-вызовы не нужны. | После кэширования unconditional PPL — \(O(KL_{\text{LM}})\). Ориентировочно **0,3–3 с на GPU** или **2–20 с на CPU**. | Напрямую измеряет semantic/logical independence границы и применима без labeled data. Сильно зависит от языка, доменной калибровки и perplexity конкретной LM; отношения PPL могут иметь неудобный масштаб. |
-| **MoC Chunk Stickiness \(CS\)** | Для пар чанков строится dependency graph: связь сильна, если conditional PPL заметно ниже unconditional PPL. Затем считается structural entropy графа. Высокая связность/«липкость» означает, что смысл чанков трудно отделить; ниже обычно лучше. | Chunks, causal LM, threshold и схема графа → скаляр graph entropy и, при необходимости, dependency graph. | Полный граф: \(O(K^2L_{\text{LM}})\), память \(O(K^2)\). Локальный граф ширины \(w\): \(O(KwL_{\text{LM}})\). Для 4–10 чанков: **1–15 с на GPU**, локальный вариант обычно быстрее. | Учитывает не только соседние, но и дальние зависимости. Полезен для документов с cross-references. Стоимость квадратична; threshold и LM влияют на результат; graph entropy сложнее объяснить продуктовой команде. |
-| **ChunkScore** | Комбинирует **Logical Independence** и **Semantic Dispersion**. LI использует отношение conditional/unconditional perplexity на соседних чанках. SD строит центрированную Gram matrix embeddings и применяет нормализованный \(\log\det(G+\alpha I)\): разнообразные, нерезервные чанки дают больший объём в embedding-пространстве. \(\mathrm{ChunkScore}=\lambda LI+(1-\lambda)SD\). | Chunks, causal LM, embedding model, \(\lambda,\alpha\) → один score и две компоненты. | LM: \(O(KL_{\text{LM}})\); embeddings: \(O(L_{\text{enc}})\); Gram \(O(K^2d)\), log-det \(O(K^3)\). При \(K<10\) доминирует inference: **0,5–5 с GPU**, **5–30 с CPU**. | Не требует QA, human labels или генеративных LLM-диалогов. Покрывает independence и redundancy. SD потенциально может вознаграждать избыточную фрагментацию и не проверяет фактическое сохранение информации. Авторы получили лучшую корреляцию при \(\lambda=0{,}3\) и сообщили корреляции выше 0,85 на дополнительных наборах, но эти значения требуют независимой репликации. |
-| **HOPE** | \(\mathrm{HOPE}=(\zeta_{\text{concept}}+\zeta_{\text{semantic}}+\zeta_{\text{information}})/3\). **Concept Unity:** LLM генерирует утверждения из чанка, embeddings измеряют их взаимное сходство. **Semantic Independence:** вопросы к чанку отвечаются с ним одним и с дополнительными retrieved chunks; близкие ответы означают самодостаточность. **Information Preservation:** из исходного документа строятся multiple-choice проверки, которые решаются по retrieved chunks. | Исходный документ, chunks, LLM, embeddings и retriever → три scores \(0\ldots1\) и итоговый HOPE. Human labels не обязательны. | Concept Unity: \(O(Ks^2d)\) плюс LLM. Independence: примерно \(O(Ks)\) двойных QA-проверок. Preservation: \(O(m)\) генераций и решений тестов. Ориентир: **20–100 LLM-операций, 10–90 с** при батчинге; без батчинга дольше. | Наиболее полное прямое покрытие concept unity, semantic independence и preservation. Авторы обнаружили, что independence была наиболее полезной и связывалась с ростом factual correctness до 56,2%, тогда как concept unity имела небольшой эффект. Ограничения: высокая стоимость, synthetic-data bias, LLM-judge variance и слабая локализация причин ошибки в агрегированном score. |
-| **AutoChunker evaluation framework** | Пять критериев: **Noise Reduction**, **Completeness**, **Context Coherence**, **Task Relevance** и **Retrieval Performance**. LLM классифицирует chunks как шумные, самодостаточные и связные; оценивает relevance к задаче; для retrieval генерируются запросы и применяется graded relevance, включая weighted Precision@K. | Документы, chunks, описанная задача, LLM, embedding/retrieval pipeline → пять процентов или scores. | Не менее \(O(K)\) LLM-оценок плюс генерация запросов и relevance judgments. При батчинге примерно **5–30 вызовов, 5–45 с** на короткий документ. | Очень широкий operational audit: замечает boilerplate, неполноту, context switches и task mismatch. Однако оценки prompt- и model-dependent; task relevance не доменно-нейтральна, а retrieval score смешивает chunker и retriever. |
+| **Chroma token Precision, Recall, IoU и $\mathrm{Precision}_\Omega$** | Пусть $t_e$ — токены gold evidence, а $t_r$ — токены retrieved chunks. $\mathrm{Precision}=\lvert t_e\cap t_r\rvert/\lvert t_r\rvert$, $\mathrm{Recall}=\lvert t_e\cap t_r\rvert/\lvert t_e\rvert$, $\mathrm{IoU}=\lvert t_e\cap t_r\rvert/\lvert t_e\cup t_r\rvert$. Лишние и дублирующиеся retrieved tokens понижают эффективность. $\mathrm{Precision}_\Omega$ оценивает oracle-набор чанков, необходимый для покрытия evidence, и тем самым сильнее изолирует эффект самих границ. | Документы, chunks, запросы, evidence spans, retriever → значения $0\ldots1$ по запросам и агрегаты. Evidence может быть human-labeled или синтетическим. | Индексация $O(KL_{\text{enc}})$; на запрос — retrieval плюс $O(R)$ token accounting. С готовыми evidence и индексом: **0,05–0,5 с**. С LLM-генерацией запросов/evidence: **3–30 с**. | Очень хорошо измеряет information preservation, retrieval recall и лишний контекст. Чувствительна к query distribution, top‑$k$, embedding-модели и качеству synthetic questions. В отчёте Chroma стратегия chunking меняла recall до девяти процентных пунктов; авторы отдельно отмечают ограниченное разнообразие синтетических вопросов. |
+| **Adaptive Chunking intrinsic suite** | **SC:** доля чанков в целевом диапазоне токенов. **ICC:** сходство предложений с embedding всего чанка. **DCC:** сходство чанка с окружающим context window. **BI:** доля абзацев, списков, таблиц и иных structural blocks, не разрезанных границей. **RC:** доля coreference-связей entity–pronoun, не разорванных между чанками. | Документ, chunks, token bounds, структурная разметка, embeddings и опциональная coreference-модель → пять scores и агрегат. Gold QA не нужна. | SC/BI: $O(n)$, **1–20 мс**. ICC/DCC: $O(L_{\text{enc}}(T)+nd)$, **0,05–0,5 с**. RC: зависит от coreference model, ориентировочно **0,2–3 с**. | Практичный и хорошо диагностируемый набор. Покрывает cohesion, structure, size и локальную independence через coreference. DCC может вознаграждать тематическую непрерывность, но не обязательно самодостаточность; RC зависит от качества coreference resolver и языка. Официальная реализация опубликована вместе с работой Adaptive Chunking. |
+| **MoC Boundary Clarity $BC$** | Для соседних чанков $d,q$: $\mathrm{BC}(q,d)=\mathrm{PPL}(q\mid d)/\mathrm{PPL}(q)$. Если предыдущий чанк сильно помогает предсказывать следующий, между ними остаётся зависимость и граница недостаточно ясна; отношение ближе к единице интерпретируется как более независимая граница. | Последовательность chunks и causal LM с token log-probabilities → score по каждой границе и среднее. Gold и генеративные API-вызовы не нужны. | После кэширования unconditional PPL — $O(KL_{\text{LM}})$. Ориентировочно **0,3–3 с на GPU** или **2–20 с на CPU**. | Напрямую измеряет semantic/logical independence границы и применима без labeled data. Сильно зависит от языка, доменной калибровки и perplexity конкретной LM; отношения PPL могут иметь неудобный масштаб. |
+| **MoC Chunk Stickiness $CS$** | Для пар чанков строится dependency graph: связь сильна, если conditional PPL заметно ниже unconditional PPL. Затем считается structural entropy графа. Высокая связность/«липкость» означает, что смысл чанков трудно отделить; ниже обычно лучше. | Chunks, causal LM, threshold и схема графа → скаляр graph entropy и, при необходимости, dependency graph. | Полный граф: $O(K^2L_{\text{LM}})$, память $O(K^2)$. Локальный граф ширины $w$: $O(KwL_{\text{LM}})$. Для 4–10 чанков: **1–15 с на GPU**, локальный вариант обычно быстрее. | Учитывает не только соседние, но и дальние зависимости. Полезен для документов с cross-references. Стоимость квадратична; threshold и LM влияют на результат; graph entropy сложнее объяснить продуктовой команде. |
+| **ChunkScore** | Комбинирует **Logical Independence** и **Semantic Dispersion**. LI использует отношение conditional/unconditional perplexity на соседних чанках. SD строит центрированную Gram matrix embeddings и применяет нормализованный $\log\det(G+\alpha I)$: разнообразные, нерезервные чанки дают больший объём в embedding-пространстве. $\mathrm{ChunkScore}=\lambda LI+(1-\lambda)SD$. | Chunks, causal LM, embedding model, $\lambda,\alpha$ → один score и две компоненты. | LM: $O(KL_{\text{LM}})$; embeddings: $O(L_{\text{enc}})$; Gram $O(K^2d)$, log-det $O(K^3)$. При $K<10$ доминирует inference: **0,5–5 с GPU**, **5–30 с CPU**. | Не требует QA, human labels или генеративных LLM-диалогов. Покрывает independence и redundancy. SD потенциально может вознаграждать избыточную фрагментацию и не проверяет фактическое сохранение информации. Авторы получили лучшую корреляцию при $\lambda=0{,}3$ и сообщили корреляции выше 0,85 на дополнительных наборах, но эти значения требуют независимой репликации. |
+| **HOPE** | $\mathrm{HOPE}=(\zeta_{\text{concept}}+\zeta_{\text{semantic}}+\zeta_{\text{information}})/3$. **Concept Unity:** LLM генерирует утверждения из чанка, embeddings измеряют их взаимное сходство. **Semantic Independence:** вопросы к чанку отвечаются с ним одним и с дополнительными retrieved chunks; близкие ответы означают самодостаточность. **Information Preservation:** из исходного документа строятся multiple-choice проверки, которые решаются по retrieved chunks. | Исходный документ, chunks, LLM, embeddings и retriever → три scores $0\ldots1$ и итоговый HOPE. Human labels не обязательны. | Concept Unity: $O(Ks^2d)$ плюс LLM. Independence: примерно $O(Ks)$ двойных QA-проверок. Preservation: $O(m)$ генераций и решений тестов. Ориентир: **20–100 LLM-операций, 10–90 с** при батчинге; без батчинга дольше. | Наиболее полное прямое покрытие concept unity, semantic independence и preservation. Авторы обнаружили, что independence была наиболее полезной и связывалась с ростом factual correctness до 56,2%, тогда как concept unity имела небольшой эффект. Ограничения: высокая стоимость, synthetic-data bias, LLM-judge variance и слабая локализация причин ошибки в агрегированном score. |
+| **AutoChunker evaluation framework** | Пять критериев: **Noise Reduction**, **Completeness**, **Context Coherence**, **Task Relevance** и **Retrieval Performance**. LLM классифицирует chunks как шумные, самодостаточные и связные; оценивает relevance к задаче; для retrieval генерируются запросы и применяется graded relevance, включая weighted Precision@K. | Документы, chunks, описанная задача, LLM, embedding/retrieval pipeline → пять процентов или scores. | Не менее $O(K)$ LLM-оценок плюс генерация запросов и relevance judgments. При батчинге примерно **5–30 вызовов, 5–45 с** на короткий документ. | Очень широкий operational audit: замечает boilerplate, неполноту, context switches и task mismatch. Однако оценки prompt- и model-dependent; task relevance не доменно-нейтральна, а retrieval score смешивает chunker и retriever. |
 | **HiCBench / HiChunk evaluation suite** | Сочетает chunk-point F1 на уровнях L1/L2/all, evidence recall и downstream response metrics. Benchmark содержит иерархические структурные annotations и evidence-intensive QA, чтобы различия между chunkers не скрывались из-за слишком разреженных evidence. | Предсказанные hierarchical boundaries, gold hierarchy, QA и evidence → boundary F1, retrieval/evidence scores и response quality. | Boundary scores: **<1 мс**. Evidence retrieval: **0,05–0,5 с** после индексации. Полный QA/LLM evaluation: **2–20 с и более**. | Один из наиболее подходящих вариантов для hierarchical chunking. Хорошо отделяет структурное совпадение от retrieval. Требует дорогой разметки или конкретного benchmark; результаты переносятся на другие домены не автоматически. |
 
-**Lexical overlap как baseline.** BLEU, ROUGE-L и n-gram overlap дешевы — \(O(T)\) времени и памяти — но не являются специализированными метриками чанкинга. Они могут обнаружить фактическое удаление или перестановку текста, однако почти слепы к неправильному положению границ. Их разумно использовать лишь как sanity check на то, что chunker не потерял символы или предложения, но не как показатель concept unity, independence или retrieval suitability. Эксперименты HOPE подтверждают слабую связь BLEU с качеством RAG.
+**Lexical overlap как baseline.** BLEU, ROUGE-L и n-gram overlap дешевы — $O(T)$ времени и памяти — но не являются специализированными метриками чанкинга. Они могут обнаружить фактическое удаление или перестановку текста, однако почти слепы к неправильному положению границ. Их разумно использовать лишь как sanity check на то, что chunker не потерял символы или предложения, но не как показатель concept unity, independence или retrieval suitability. Эксперименты HOPE подтверждают слабую связь BLEU с качеством RAG.
 
 ## Сводное сравнение и выбор
 
 | Метрика | Стоимость | Семантическая чувствительность | Нужна размеченная информация | Простота реализации | Пригодность для RAG |
 |---|---:|---:|---|---:|---:|
 | Boundary F1 | Низкая | Нет | Gold boundaries | Высокая | Средняя |
-| \(P_k\) | Низкая | Нет | Gold boundaries | Высокая | Низкая–средняя |
+| $P_k$ | Низкая | Нет | Gold boundaries | Высокая | Низкая–средняя |
 | WindowDiff | Низкая | Нет | Gold boundaries | Высокая | Средняя |
 | Boundary Similarity / BED | Низкая | Нет | Gold boundaries | Средняя | Средняя |
 | BLEU / ROUGE baseline | Низкая | Очень низкая | Reference text | Высокая | Низкая |
@@ -144,7 +144,7 @@ flowchart TD
 1. Разбить документ на устойчивые atomic units: предложения, Markdown-блоки или абзацы.
 2. Представить каждую границу индексом атомарной единицы, после которой она находится.
 3. Не включать обязательные начало и конец документа либо одинаково обработать их в обеих разметках.
-4. Однозначно сопоставить predicted и gold boundaries в пределах \(\delta\).
+4. Однозначно сопоставить predicted и gold boundaries в пределах $\delta$.
 5. Вычислить precision, recall и F1; дополнительно сохранить распределение расстояний matched boundaries.
 
 ```text
@@ -181,13 +181,13 @@ function tolerant_boundary_f1(gold, predicted, delta):
 
 **WindowDiff**
 
-WindowDiff полезна как второй независимый сигнал: Boundary F1 спрашивает, совпали ли позиции границ, а WindowDiff — насколько сильно меняется локальное число сегментов. Она особенно хорошо выявляет систематическое over-segmentation и under-segmentation. Метрика была предложена как улучшение \(P_k\) и доступна в NLTK и SegEval.
+WindowDiff полезна как второй независимый сигнал: Boundary F1 спрашивает, совпали ли позиции границ, а WindowDiff — насколько сильно меняется локальное число сегментов. Она особенно хорошо выявляет систематическое over-segmentation и under-segmentation. Метрика была предложена как улучшение $P_k$ и доступна в NLTK и SegEval.
 
 Порядок реализации:
 
-1. Создать бинарные массивы длины \(n-1\): `1` означает границу после атомарной единицы.
+1. Создать бинарные массивы длины $n-1$: `1` означает границу после атомарной единицы.
 2. Рассчитать среднюю длину gold-сегмента.
-3. Выбрать \(k\approx\frac{1}{2}\) средней длины сегмента.
+3. Выбрать $k\approx\frac{1}{2}$ средней длины сегмента.
 4. Построить prefix sums границ.
 5. Для каждого окна сравнить число gold и predicted boundaries.
 6. Отдельно сообщать обычный и weighted WindowDiff, если важна величина over/under-segmentation.
@@ -214,13 +214,13 @@ function window_diff(gold_boundary_array, pred_boundary_array, k, weighted=false
     return error / max(1, n-k+1)
 ```
 
-WindowDiff нельзя интерпретировать вне контекста \(k\): два эксперимента с разными окнами напрямую несопоставимы. В отчётах следует публиковать \(k\), среднюю длину gold-сегмента и число границ, а также Boundary F1, чтобы отличать near misses от неверного количества сегментов.
+WindowDiff нельзя интерпретировать вне контекста $k$: два эксперимента с разными окнами напрямую несопоставимы. В отчётах следует публиковать $k$, среднюю длину gold-сегмента и число границ, а также Boundary F1, чтобы отличать near misses от неверного количества сегментов.
 
 **Lightweight Cohesion–Separation–Integrity score**
 
 Для production-корпуса без gold boundaries можно применять следующий дешёвый composite:
 
-\[
+$$
 \mathrm{LCSI}
 =
 \left(
@@ -232,21 +232,21 @@ WindowDiff нельзя интерпретировать вне контекст
 \cdot
 \mathrm{SC}
 \right)^{1/4}.
-\]
+$$
 
 Здесь:
 
-\[
+$$
 \mathrm{ICC}
 =
 \frac{1}{n}
 \sum_i
 \cos(v_i,\bar v_{c(i)})
-\]
+$$
 
 — среднее сходство предложения с centroid своего чанка;
 
-\[
+$$
 \mathrm{BSEP}
 =
 \frac{1}{K-1}
@@ -254,26 +254,26 @@ WindowDiff нельзя интерпретировать вне контекст
 \left[
 1-\cos(\bar v_{\text{left},j},\bar v_{\text{right},j})
 \right]
-\]
+$$
 
 — средний semantic/lexical contrast вокруг границ;
 
-\[
+$$
 \mathrm{BI}
 =
 1-
 \frac{\text{число structural blocks, пересечённых границей}}
 {\max(1,\text{число structural blocks})}
-\]
+$$
 
 — block integrity;
 
-\[
+$$
 \mathrm{SC}
 =
 \frac{\text{число chunks в допустимом диапазоне}}
 K
-\]
+$$
 
 — size compliance.
 
@@ -354,7 +354,7 @@ function lcsi(document, chunks, min_tokens, max_tokens):
 
 Денежную стоимость корректнее считать формулой:
 
-\[
+$$
 \mathrm{Cost}
 =
 \frac{
@@ -362,9 +362,9 @@ T_{\mathrm{in}}C_{\mathrm{in}}
 +
 T_{\mathrm{out}}C_{\mathrm{out}}
 }{10^6},
-\]
+$$
 
-где \(C_{\mathrm{in}}\) и \(C_{\mathrm{out}}\) — тарифы выбранной модели за миллион токенов. Например, при условной blended-цене **$1 за миллион token-equivalents** workload HOPE в 20k–150k соответствует примерно **$0,02–0,15 на документ**; при blended-цене **$10** — примерно **$0,20–1,50**. Это иллюстрация, не тариф конкретного поставщика; реальная стоимость зависит от повторного включения document context, batching, caching и количества samples.
+где $C_{\mathrm{in}}$ и $C_{\mathrm{out}}$ — тарифы выбранной модели за миллион токенов. Например, при условной blended-цене **\$1 за миллион token-equivalents** workload HOPE в 20k–150k соответствует примерно **\$0,02–0,15 на документ**; при blended-цене **\$10** — примерно **\$0,20–1,50**. Это иллюстрация, не тариф конкретного поставщика; реальная стоимость зависит от повторного включения document context, batching, caching и количества samples.
 
 **Когда оправдан HOPE.** Метод особенно полезен для документов, где смысл зависит от исключений, ссылок, условий и соседних фрагментов: нормативных документов, технических инструкций, медицинских протоколов и договоров. В таких случаях semantic independence важнее простой topic cohesion. Статья HOPE показала существенно более сильную связь independence с RAG-показателями, чем concept unity, что ставит под сомнение распространённое правило «один чанк — ровно одна тема».
 
@@ -384,8 +384,8 @@ LLM-as-a-judge требует контроля воспроизводимост�
 
 | Проект | Что реализовано | Практический комментарий |
 |---|---|---|
-| **NLTK `nltk.metrics.segmentation`** | WindowDiff, \(P_k\), Generalized Hamming Distance | Самый простой вариант для классических baseline; функции принимают бинарные последовательности границ. Не следует путать с `nltk.chunk.ChunkScore`, который оценивает синтаксический shallow parsing, а не document chunking. |
-| **SegEval** | Boundary Edit Distance, Boundary Similarity, BED confusion matrix, precision/recall/F1, Segmentation Similarity, WindowDiff, \(P_k\), inter-coder agreement | Наиболее полный специализированный пакет для reference-based text segmentation. Последний документированный release старый, поэтому перед production-use стоит проверить совместимость с современной Python-средой. |
+| **NLTK `nltk.metrics.segmentation`** | WindowDiff, $P_k$, Generalized Hamming Distance | Самый простой вариант для классических baseline; функции принимают бинарные последовательности границ. Не следует путать с `nltk.chunk.ChunkScore`, который оценивает синтаксический shallow parsing, а не document chunking. |
+| **SegEval** | Boundary Edit Distance, Boundary Similarity, BED confusion matrix, precision/recall/F1, Segmentation Similarity, WindowDiff, $P_k$, inter-coder agreement | Наиболее полный специализированный пакет для reference-based text segmentation. Последний документированный release старый, поэтому перед production-use стоит проверить совместимость с современной Python-средой. |
 | **Chroma `chunking_evaluation`** | Token-level evaluation pipeline, generation of domain-specific evaluation data, несколько chunkers | Подходит для сравнительных retrieval-экспериментов; официальный repository связан с техническим отчётом Chroma. |
 | **Adaptive Chunking** | SC, ICC, DCC, BI, filtered missing-reference/coreference error; splitter selection | Особенно полезен как готовый intrinsic baseline. Репозиторий содержит modular metrics, PDF parsing и reproduction data; часть coreference-зависимостей имеет отдельные лицензионные условия. |
 | **Meta-Chunking / MoC** | Boundary Clarity, Chunk Stickiness и MoC chunker | Исследовательская реализация perplexity- и graph-based evaluation; требует локальной LM и аккуратной настройки inference. |
@@ -398,7 +398,7 @@ LLM-as-a-judge требует контроля воспроизводимост�
 
 **Неединственность правильной сегментации.** Документ может иметь несколько разумных разбиений, а human annotators могут не соглашаться о точном положении topic boundaries. Классические metrics сравнивают с одной или несколькими references, но не моделируют множество equally valid RAG granularities. Segmentation Similarity и Boundary Similarity смягчают near misses, однако не решают проблему query-dependent validity.
 
-**Смешение качества chunker и retriever.** Recall@k, MRR, nDCG и даже token IoU зависят от embedding model, ANN index, reranker и top‑\(k\). С другой стороны, полностью intrinsic metrics могут пропустить query-specific failure. Перспективное направление — контрфактическая оценка: фиксировать evidence span и вычислять минимальную стоимость его покрытия при разных boundaries независимо от ranking model, развивая идею oracle Precision\(_\Omega\).
+**Смешение качества chunker и retriever.** Recall@k, MRR, nDCG и даже token IoU зависят от embedding model, ANN index, reranker и top‑$k$. С другой стороны, полностью intrinsic metrics могут пропустить query-specific failure. Перспективное направление — контрфактическая оценка: фиксировать evidence span и вычислять минимальную стоимость его покрытия при разных boundaries независимо от ranking model, развивая идею oracle $\mathrm{Precision}_\Omega$.
 
 **Слабая оценка дальних зависимостей.** Локальный boundary contrast не замечает, что условие на первой странице модифицирует правило на десятой. Chunk Stickiness пытается построить глобальный dependency graph, а HOPE проверяет изменение ответов при добавлении других chunks, но оба подхода дороги. Нужны дешёвые dependency-aware metrics на entity graphs, discourse relations и explicit cross-references.
 
@@ -410,7 +410,7 @@ LLM-as-a-judge требует контроля воспроизводимост�
 
 **Стоимость как часть качества.** Большинство работ оптимизирует correctness или recall, но production-решение должно учитывать число chunks, индексный объём, ingestion latency, retrieval latency, число retrieved tokens и LLM context cost. Перспективный итоговый объект — не один score, а Pareto surface:
 
-\[
+$$
 \left(
 \text{evidence recall},
 \text{token precision},
@@ -419,6 +419,6 @@ LLM-as-a-judge требует контроля воспроизводимост�
 \text{latency},
 \text{monetary cost}
 \right).
-\]
+$$
 
 **Рекомендуемый исследовательский baseline.** Для нового benchmark целесообразно публиковать tolerant Boundary F1, WindowDiff, Boundary Similarity, Adaptive ICC/BI/RC, Chroma token Precision/Recall/IoU, retrieval Recall@k и nDCG, а на репрезентативной подвыборке — HOPE или AutoChunker evaluation. Такая комбинация покрывает границы, concept cohesion, structural integrity, semantic independence, information preservation и реальную retrieval effectiveness, не делая весь эксперимент зависимым от одного дорогостоящего LLM-judge.
