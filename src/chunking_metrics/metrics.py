@@ -57,3 +57,28 @@ def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float:
         chunk_cohesions.append(np.mean(similarities))
 
     return float(np.mean(chunk_cohesions))
+
+
+def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float:
+    """Contextual Coherence evaluates how consistent a chunk is with the local context from which it was extracted.
+    Unlike the ICC, this metric does not look inside the chunk, but at its relation to the surrounding text of the document.
+    A typical scheme is to compare the embedding of a chunk with the embedding of a context window around it.
+    The context can be adjacent sentences, paragraphs, or a fixed number of tokens before and after the chunk.
+    - chunk_embs -> array (emb dims)
+    - context_embs -> array (context blocks, emb dims)
+    """
+    if chunk_embs.ndim != 1:
+        return 0.0
+    if context_embs.ndim != 2 or context_embs.shape[0] <= 0:
+        return 0.0
+    if chunk_embs.shape[0] != context_embs.shape[1]:
+        return 0.0
+
+    context_emb = np.mean(context_embs, axis=0)
+    chunk_norm = np.linalg.norm(chunk_embs)
+    context_norm = np.linalg.norm(context_emb)
+    if chunk_norm == 0 or context_norm == 0:
+        return 0.0
+
+    return float(chunk_embs @ context_emb / (chunk_norm * context_norm))
+    
