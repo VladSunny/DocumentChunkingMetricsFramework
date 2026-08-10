@@ -29,7 +29,12 @@ def size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> flo
 
 
 def block_integrity(*args: Any, **kwargs: Any) -> None:
-    """Not implemented yet"""
+    """Not implemented yet
+    Block Integrity evaluates how much the boundaries of chunks preserve the natural structure of the document.
+    The structural blocks can be paragraphs, lists, tables, code blocks, quotations, figure captions, and other elements that can be automatically selected when parsing a document.
+    The basic intuition is simple: if a table, list, or linked paragraph is split between several chunks, part of the local context may be lost during retrieval.
+    At the same time, the same gap has different significance for different types of structure: cutting a table is usually more dangerous than a long paragraph.
+    """
     del args, kwargs
     raise NotImplementedError("Not implemented yet")
 
@@ -80,3 +85,30 @@ def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> fl
         return 0.0
 
     return float(similarity)
+
+
+def coreference_integrity(*args: Any, **kwargs: Any) -> None:
+    """Not implemented yet
+    Coreference Integrity measures how much the boundaries of chunks break the relationship between expressions that refer to the same entity.
+
+    For example:
+
+    Chunk 1:
+    Ivan handed over the contract to Peter.
+
+    Chunk 2:
+    He signed it the next day.
+
+    In the second chunk, the pronouns "he" and "his" require information from the first.
+    If only the second chunk is found during retrieval, its interpretation will become ambiguous.
+    Coreference resolver builds chains of mentions of a single entity, after which you can check which connections pass through the boundaries of chunks.
+    """
+    del args, kwargs
+    raise NotImplementedError("Not implemented yet")
+
+def boundary_clarity() -> float:
+    """Boundary Clarity evaluates how independent two neighboring chunks are from the point of view of the causal language model.
+    If the previous chunk makes it much easier for the language model to predict the next one, this indicates a strong relationship between them and a potentially weak boundary.
+    The metric is based on comparing the unconditional perplexity of the next chunk and the perplexity of the same text in the presence of the previous chunk in the context.
+    """
+    pass
