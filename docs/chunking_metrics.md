@@ -26,36 +26,6 @@
 | **HOPE Information Preservation** | сохранение исходной информации | document + chunks + LLM + retrieval | да | document-level |
 | **HOPE aggregate** | совокупную HOPE-оценку | три компоненты HOPE | да | composite |
 
-## Подготовка embeddings
-
-Пакет предоставляет `calculate_embeddings` для локального получения нормализованных
-sentence embeddings через модели Hugging Face. По умолчанию используется компактная
-`cointegrated/rubert-tiny2`; при первом вызове модель скачивается и затем переиспользуется
-из локального кэша.
-
-```python
-from chunking_metrics import (
-    calculate_embeddings,
-    contextual_coherence,
-    intrachunk_cohesion,
-)
-
-sentences = ["Первое предложение.", "Связанное с ним второе предложение."]
-sentence_embs = calculate_embeddings(sentences)
-cohesion = intrachunk_cohesion([sentence_embs])
-
-chunk_emb = calculate_embeddings("Текст оцениваемого чанка.")
-context_embs = calculate_embeddings(["Левый контекст.", "Правый контекст."])
-coherence = contextual_coherence(chunk_emb, context_embs)
-```
-
-Одиночная строка даёт вектор формы `(embedding_dim,)`, а последовательность строк —
-матрицу `(text_count, embedding_dim)`. Модель можно заменить через `model_name`, устройство —
-через `device`, а размер inference-батча — через `batch_size`. Тексты длиннее контекстного
-окна модели обрезаются с `UserWarning`.
-
----
-
 # 1. Size Compliance (SC)
 
 ## Идея
@@ -340,33 +310,6 @@ $$
 
 - $PPL(q)$ — perplexity текста $q$ без предыдущего чанка;
 - $PPL(q\mid d)$ — perplexity $q$, когда $d$ дан модели как предыдущий контекст.
-
-Для локального расчёта обеих величин пакет предоставляет `calculate_perplexity`:
-
-```python
-from chunking_metrics import boundary_clarity, calculate_perplexity
-
-previous_chunk = "Иван передал договор Петру."
-next_chunk = "Он подписал его на следующий день."
-
-unconditional_ppl = calculate_perplexity(next_chunk)
-conditional_ppl = calculate_perplexity(next_chunk, context=previous_chunk)
-score = boundary_clarity(
-    uncond_ppls=[calculate_perplexity(previous_chunk), unconditional_ppl],
-    cond_ppls=[conditional_ppl],
-)
-```
-
-По умолчанию используется русскоязычная causal LM
-`ai-forever/rugpt3small_based_on_gpt2`. Можно передать другой Hugging Face model ID
-или путь к локальной модели через `model_name`. При первом вызове модель загружается и
-попадает в Hugging Face cache; последняя использованная модель также переиспользуется внутри
-процесса. `device=None` автоматически выбирает CUDA, затем MPS и CPU, а нужное устройство
-можно задать явно.
-
-Контекст виден модели, но его токены не входят в loss. Между контекстом и целевым текстом
-нормализуется один пробел. Если вся последовательность не помещается в окно модели, старые
-токены контекста отбрасываются с `UserWarning`; сам целевой текст никогда не обрезается.
 
 ## Интерпретация
 
