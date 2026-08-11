@@ -1,7 +1,7 @@
 import numpy as np
 from dotenv import load_dotenv
 
-from chunking_metrics import calculate_embeddings, concept_unity, generate_statements
+from chunking_metrics import calculate_embeddings, concept_unity, generate_statements_local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "
@@ -13,7 +13,7 @@ STATEMENT_COUNT = 5
 
 def main() -> None:
     load_dotenv()
-    statements = generate_statements(
+    statements = generate_statements_local(
         CHUNK,
         statement_count=STATEMENT_COUNT,
         # device="cpu",

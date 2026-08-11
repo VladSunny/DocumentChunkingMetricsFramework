@@ -161,7 +161,7 @@ def test_generate_statements_returns_exact_cleaned_json_statements(
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_statements(
+    result = preparation.generate_statements_local(
         "Текст чанка.",
         model_name="model",
         statement_count=2,
@@ -192,7 +192,7 @@ def test_generate_statements_formats_custom_prompt(
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_statements(
+    result = preparation.generate_statements_local(
         "Текст чанка.",
         model_name="model",
         prompt="Create {statement_count} claims from {chunk}.",
@@ -246,7 +246,7 @@ def test_generate_statements_rejects_invalid_argument_types_before_loading_model
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.generate_statements(**arguments)  # type: ignore[arg-type]
+        preparation.generate_statements_local(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -298,7 +298,7 @@ def test_generate_statements_rejects_invalid_argument_values_before_loading_mode
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.generate_statements(**call_arguments)  # type: ignore[arg-type]
+        preparation.generate_statements_local(**call_arguments)  # type: ignore[arg-type]
 
 
 def test_generate_statements_rejects_chunk_that_cannot_fit_without_truncation(
@@ -313,7 +313,7 @@ def test_generate_statements_rejects_chunk_that_cannot_fit_without_truncation(
     )
 
     with pytest.raises(ValueError, match="do not fit within the model context window"):
-        preparation.generate_statements(
+        preparation.generate_statements_local(
             "Текст чанка.",
             model_name="model",
             statement_count=2,
@@ -341,7 +341,7 @@ def test_generate_statements_requires_tokenizer_chat_template(
     )
 
     with pytest.raises(ValueError, match="tokenizer must define a chat template"):
-        preparation.generate_statements("Текст чанка.", model_name="model", device="cpu")
+        preparation.generate_statements_local("Текст чанка.", model_name="model", device="cpu")
 
 
 @pytest.mark.parametrize(
@@ -370,7 +370,7 @@ def test_generate_statements_rejects_response_outside_strict_json_contract(
         ValueError,
         match="model response must be a JSON array of exactly 2 non-empty strings",
     ):
-        preparation.generate_statements(
+        preparation.generate_statements_local(
             "Текст чанка.",
             model_name="model",
             statement_count=2,
@@ -390,7 +390,7 @@ def test_generate_statements_is_exported_from_package(
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = chunking_metrics.generate_statements(
+    result = chunking_metrics.generate_statements_local(
         "Текст чанка.",
         model_name="model",
         statement_count=2,
@@ -415,7 +415,7 @@ def test_generate_questions_returns_exact_cleaned_json_questions(
 
     monkeypatch.setattr(preparation, "_load_model_and_tokenizer", load_model)
 
-    result = preparation.generate_questions(
+    result = preparation.generate_questions_local(
         "Текст чанка.",
         question_count=2,
         temperature=0.5,
@@ -443,7 +443,7 @@ def test_generate_questions_formats_custom_prompt(monkeypatch: pytest.MonkeyPatc
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_questions(
+    result = preparation.generate_questions_local(
         "Текст чанка.",
         model_name="model",
         prompt="Create {question_count} questions from {chunk}.",
@@ -497,7 +497,7 @@ def test_generate_questions_rejects_invalid_argument_types_before_loading_model(
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.generate_questions(**arguments)  # type: ignore[arg-type]
+        preparation.generate_questions_local(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -549,7 +549,7 @@ def test_generate_questions_rejects_invalid_argument_values_before_loading_model
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.generate_questions(**call_arguments)  # type: ignore[arg-type]
+        preparation.generate_questions_local(**call_arguments)  # type: ignore[arg-type]
 
 
 def test_generate_questions_rejects_chunk_that_cannot_fit_without_truncation(
@@ -564,7 +564,7 @@ def test_generate_questions_rejects_chunk_that_cannot_fit_without_truncation(
     )
 
     with pytest.raises(ValueError, match="do not fit within the model context window"):
-        preparation.generate_questions(
+        preparation.generate_questions_local(
             "Текст чанка.",
             model_name="model",
             question_count=2,
@@ -592,7 +592,7 @@ def test_generate_questions_requires_tokenizer_chat_template(
     )
 
     with pytest.raises(ValueError, match="tokenizer must define a chat template"):
-        preparation.generate_questions("Текст чанка.", model_name="model", device="cpu")
+        preparation.generate_questions_local("Текст чанка.", model_name="model", device="cpu")
 
 
 @pytest.mark.parametrize(
@@ -621,7 +621,7 @@ def test_generate_questions_rejects_response_outside_strict_json_contract(
         ValueError,
         match="model response must be a JSON array of exactly 2 non-empty strings",
     ):
-        preparation.generate_questions(
+        preparation.generate_questions_local(
             "Текст чанка.",
             model_name="model",
             question_count=2,
@@ -639,7 +639,7 @@ def test_generate_questions_is_exported_from_package(monkeypatch: pytest.MonkeyP
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = chunking_metrics.generate_questions(
+    result = chunking_metrics.generate_questions_local(
         "Текст чанка.",
         model_name="model",
         question_count=2,

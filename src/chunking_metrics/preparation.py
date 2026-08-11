@@ -427,26 +427,6 @@ def calculate_perplexity(
     return float(torch.exp(output.loss.detach()).cpu().item())
 
 
-@overload
-def calculate_embeddings(
-    texts: str,
-    model_name: str = DEFAULT_EMBEDDING_MODEL,
-    *,
-    device: str | None = None,
-    batch_size: int = 32,
-) -> np.ndarray: ...
-
-
-@overload
-def calculate_embeddings(
-    texts: Sequence[str],
-    model_name: str = DEFAULT_EMBEDDING_MODEL,
-    *,
-    device: str | None = None,
-    batch_size: int = 32,
-) -> np.ndarray: ...
-
-
 def calculate_embeddings(
     texts: str | Sequence[str],
     model_name: str = DEFAULT_EMBEDDING_MODEL,
@@ -492,7 +472,7 @@ def calculate_embeddings(
     )
 
 
-def generate_statements(
+def generate_statements_local(
     chunk: str,
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
@@ -569,7 +549,7 @@ def generate_statements(
     return _parse_statement_response(response, statement_count)
 
 
-def generate_questions(
+def generate_questions_local(
     chunk: str,
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
