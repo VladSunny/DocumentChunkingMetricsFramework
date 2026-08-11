@@ -11,7 +11,12 @@ import torch
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from .prompts import DEFAULT_STATEMENT_PROMPT, DEFAULT_STATEMENT_SYSTEM_PROMPT
+from .prompts import (
+    DEFAULT_QUESTION_PROMPT,
+    DEFAULT_QUESTION_SYSTEM_PROMPT,
+    DEFAULT_STATEMENT_PROMPT,
+    DEFAULT_STATEMENT_SYSTEM_PROMPT,
+)
 
 DEFAULT_EMBEDDING_MODEL = "cointegrated/rubert-tiny2"
 DEFAULT_PERPLEXITY_MODEL = "ai-forever/rugpt3small_based_on_gpt2"
@@ -220,6 +225,101 @@ def _parse_statement_response(response: str, statement_count: int) -> list[str]:
     ):
         raise ValueError(error_message)
     return [statement.strip() for statement in statements]
+
+
+def _validate_question_arguments(
+    chunk: str,
+    model_name: str,
+    prompt: str,
+    question_count: int,
+    temperature: float,
+    max_new_tokens: int,
+    device: str | None,
+) -> None:
+    if not isinstance(chunk, str):
+        raise TypeError("chunk must be a string")
+    if not isinstance(model_name, str):
+        raise TypeError("model_name must be a string")
+    if not isinstance(prompt, str):
+        raise TypeError("prompt must be a string")
+    if not isinstance(question_count, int) or isinstance(question_count, bool):
+        raise TypeError("question_count must be an integer")
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        raise TypeError("temperature must be a number")
+    if not isinstance(max_new_tokens, int) or isinstance(max_new_tokens, bool):
+        raise TypeError("max_new_tokens must be an integer")
+    if device is not None and not isinstance(device, str):
+        raise TypeError("device must be a string or None")
+    if not chunk.strip():
+        raise ValueError("chunk must not be empty")
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
+    if not prompt.strip():
+        raise ValueError("prompt must not be empty")
+    try:
+        prompt_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(prompt)
+            if field_name is not None
+        }
+    except ValueError as error:
+        raise ValueError("prompt must be a valid format string") from error
+    required_fields = {"chunk", "question_count"}
+    if not required_fields.issubset(prompt_fields):
+        raise ValueError("prompt must contain {chunk} and {question_count}")
+    unsupported_fields = prompt_fields - required_fields
+    if unsupported_fields:
+        unsupported_field = sorted(unsupported_fields)[0]
+        raise ValueError(f"prompt contains an unsupported placeholder: {unsupported_field}")
+    if question_count <= 0:
+        raise ValueError("question_count must be greater than zero")
+    if not math.isfinite(temperature):
+        raise ValueError("temperature must be finite")
+    if temperature <= 0:
+        raise ValueError("temperature must be greater than zero")
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be greater than zero")
+
+
+def _question_messages(
+    chunk: str,
+    question_count: int,
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(
+            chunk=json.dumps(chunk, ensure_ascii=False),
+            question_count=question_count,
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_QUESTION_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": user_prompt,
+        },
+    ]
+
+
+def _parse_question_response(response: str, question_count: int) -> list[str]:
+    error_message = (
+        f"model response must be a JSON array of exactly {question_count} non-empty strings"
+    )
+    try:
+        questions = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if (
+        not isinstance(questions, list)
+        or len(questions) != question_count
+        or any(not isinstance(question, str) or not question.strip() for question in questions)
+    ):
+        raise ValueError(error_message)
+    return [question.strip() for question in questions]
 
 
 def _prefix_token_id(tokenizer: Any, model: Any) -> int:
@@ -464,3 +564,81 @@ def generate_statements(
         )
     response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
     return _parse_statement_response(response, statement_count)
+
+
+def generate_questions(
+    chunk: str,
+    model_name: str = DEFAULT_STATEMENT_MODEL,
+    *,
+    prompt: str = DEFAULT_QUESTION_PROMPT,
+    question_count: int = 5,
+    temperature: float = 0.7,
+    max_new_tokens: int = 256,
+    device: str | None = None,
+) -> list[str]:
+    """Generate questions answerable from one text chunk with a causal chat model.
+
+    Args:
+        chunk: Source text from which the questions are generated.
+        model_name: Hugging Face causal language model identifier or local model path. Its
+            tokenizer must define a chat template.
+        prompt: Format string used for the user message. It must contain ``{chunk}`` and
+            ``{question_count}`` placeholders. Escape literal braces by doubling them.
+        question_count: Exact number of questions required in the model response.
+        temperature: Positive non-zero sampling temperature used to encourage question diversity.
+        max_new_tokens: Maximum number of tokens available for the JSON response.
+        device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
+            CUDA is preferred, followed by MPS and CPU.
+
+    Returns:
+        A list containing exactly ``question_count`` non-empty questions.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument is invalid, the prompt and response budget do not fit the
+            context window, the tokenizer has no chat template, or the model response is not a
+            JSON array containing exactly the requested number of non-empty strings.
+
+    Generation is stochastic and happens once without retries. The chunk is never truncated.
+    """
+    _validate_question_arguments(
+        chunk,
+        model_name,
+        prompt,
+        question_count,
+        temperature,
+        max_new_tokens,
+        device,
+    )
+    messages = _question_messages(chunk, question_count, prompt)
+    resolved_device = _resolve_device(device)
+    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
+    try:
+        model_inputs = tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            return_dict=True,
+        )
+    except ValueError as error:
+        raise ValueError("model tokenizer must define a chat template") from error
+    model_inputs = {name: tensor.to(resolved_device) for name, tensor in model_inputs.items()}
+    prompt_length = model_inputs["input_ids"].shape[-1]
+    if prompt_length + max_new_tokens > max_length:
+        raise ValueError("chunk and generated response do not fit within the model context window")
+
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
+    with torch.inference_mode():
+        output_ids = model.generate(
+            **model_inputs,
+            do_sample=True,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            pad_token_id=pad_token_id,
+        )
+    response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
+    print(response)
+    return _parse_question_response(response, question_count)

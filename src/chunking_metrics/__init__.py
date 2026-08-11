@@ -10,6 +10,7 @@ from .preparation import (
     DEFAULT_STATEMENT_MODEL,
     calculate_embeddings,
     calculate_perplexity,
+    generate_questions,
     generate_statements,
 )
 
@@ -20,6 +21,7 @@ __all__ = [
     "calculate_perplexity",
     "concept_unity",
     "contextual_coherence",
+    "generate_questions",
     "generate_statements",
     "intrachunk_cohesion",
     "semantic_independence",
