@@ -11,6 +11,7 @@ from .preparation import (
     calculate_embeddings,
     calculate_perplexity,
     generate_questions_local,
+    generate_statements_api,
     generate_statements_local,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
     "concept_unity",
     "contextual_coherence",
     "generate_questions_local",
+    "generate_statements_api",
     "generate_statements_local",
     "intrachunk_cohesion",
     "semantic_independence",

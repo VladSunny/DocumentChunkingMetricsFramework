@@ -4,12 +4,13 @@ import warnings
 from collections.abc import Sequence
 from functools import lru_cache
 from string import Formatter
-from typing import Any, overload
+from typing import Any
 
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from openai import OpenAI
 
 from .prompts import (
     DEFAULT_QUESTION_PROMPT,
@@ -213,7 +214,7 @@ def _statement_messages(
 
 
 def _parse_statement_response(response: str, statement_count: int) -> list[str]:
-    print("!!!!", response)
+    # print("!!!!", response)
     error_message = (
         f"model response must be a JSON array of exactly {statement_count} non-empty strings"
     )
@@ -547,6 +548,60 @@ def generate_statements_local(
         )
     response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
     return _parse_statement_response(response, statement_count)
+
+
+def generate_statements_api(
+    chunk: str,
+    model_name: str = "",
+    api_key: str = "",
+    base_url: str = "",
+    *,
+    prompt: str = DEFAULT_STATEMENT_PROMPT,
+    statement_count: int = 5,
+    temperature: float = 0.7,
+    max_new_tokens: int = 256,
+) -> list[str]:
+    """Generate factual statements from one text chunk with a causal chat model.
+
+    Args:
+        chunk: Source text from which the statements are extracted.
+        model_name
+        api_key
+        prompt: Format string used for the user message. It must contain ``{chunk}`` and
+            ``{statement_count}`` placeholders. Escape literal braces by doubling them.
+        statement_count: Exact number of statements required in the model response.
+        temperature: Positive non-zero sampling temperature used to encourage concept coverage.
+        max_new_tokens: Maximum number of tokens available for the JSON response.
+
+    Returns:
+        A list containing exactly ``statement_count`` non-empty statements.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument is invalid, the prompt and response budget do not fit the
+            context window, the tokenizer has no chat template, or the model response is not a
+            JSON array containing exactly the requested number of non-empty strings.
+
+    Generation is stochastic and happens once without retries. The chunk is never truncated.
+    """
+    messages = _statement_messages(chunk, statement_count, prompt)
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        stream=False,
+        # reasoning_effort="low",
+        extra_body={"thinking": {"type": "disabled"}},
+        response_format={"type": "json_object"},
+        max_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+
+    content = response.choices[0].message.content
+
+    return _parse_statement_response(content, statement_count)
 
 
 def generate_questions_local(
