@@ -135,6 +135,53 @@ class FakeStatementModel:
         return torch.tensor([[10, 11, 20, 21]], dtype=torch.long)
 
 
+class FakeAnswerTokenizer:
+    eos_token_id = 2
+    pad_token_id = 3
+
+    def __init__(self, responses: list[str], prompt_lengths: list[int] | None = None) -> None:
+        self.responses = responses
+        self.prompt_lengths = prompt_lengths or [2] * len(responses)
+        self.messages: list[list[dict[str, str]]] = []
+        self.decode_index = 0
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        tokenize: bool,
+        add_generation_prompt: bool,
+        return_tensors: str,
+        return_dict: bool,
+    ) -> dict[str, torch.Tensor]:
+        assert tokenize is True
+        assert add_generation_prompt is True
+        assert return_tensors == "pt"
+        assert return_dict is True
+        prompt_length = self.prompt_lengths[len(self.messages)]
+        self.messages.append(messages)
+        return {
+            "input_ids": torch.tensor([list(range(prompt_length))], dtype=torch.long),
+            "attention_mask": torch.ones((1, prompt_length), dtype=torch.long),
+        }
+
+    def decode(self, token_ids: torch.Tensor, *, skip_special_tokens: bool) -> str:
+        assert skip_special_tokens is True
+        response = self.responses[self.decode_index]
+        self.decode_index += 1
+        return response
+
+
+class FakeAnswerModel:
+    def __init__(self) -> None:
+        self.generation_arguments: list[dict[str, Any]] = []
+
+    def generate(self, **kwargs: Any) -> torch.Tensor:
+        self.generation_arguments.append(kwargs)
+        input_ids = kwargs["input_ids"]
+        return torch.cat((input_ids, torch.tensor([[20]], dtype=torch.long)), dim=1)
+
+
 def install_fake_components(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -648,6 +695,348 @@ def test_generate_questions_is_exported_from_package(monkeypatch: pytest.MonkeyP
     )
 
     assert result == ["Первый?", "Второй?"]
+
+
+def test_generate_answers_local_returns_answers_in_order_with_per_question_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeAnswerTokenizer([" Первый ответ. ", "Второй ответ."])
+    model = FakeAnswerModel()
+    loads: list[tuple[str, str]] = []
+
+    def load_model(model_name: str, device: str) -> tuple[Any, Any, int]:
+        loads.append((model_name, device))
+        return tokenizer, model, 32
+
+    monkeypatch.setattr(preparation, "_load_model_and_tokenizer", load_model)
+
+    result = preparation.generate_answers_local(
+        ["Первый вопрос?", "Второй вопрос?"],
+        "Основной чанк.",
+        model_name="model",
+        additional_chunks_by_question=[["Дополнение 1."], ["Дополнение 2.", "Дополнение 3."]],
+        max_new_tokens=4,
+        device="cpu",
+    )
+
+    assert result == ["Первый ответ.", "Второй ответ."]
+    assert loads == [("model", "cpu")]
+    assert len(model.generation_arguments) == 2
+    first_prompt = tokenizer.messages[0][-1]["content"]
+    second_prompt = tokenizer.messages[1][-1]["content"]
+    assert '"Первый вопрос?"' in first_prompt
+    assert '<primary_source>\n"Основной чанк."\n</primary_source>' in first_prompt
+    assert '<additional_sources>\n["Дополнение 1."]\n</additional_sources>' in first_prompt
+    assert '"Второй вопрос?"' in second_prompt
+    assert (
+        '<additional_sources>\n["Дополнение 2.", "Дополнение 3."]\n</additional_sources>'
+        in second_prompt
+    )
+
+
+@pytest.mark.parametrize(
+    ("temperature", "expected_generation_arguments"),
+    [
+        (0.0, {"do_sample": False}),
+        (0.4, {"do_sample": True, "temperature": 0.4}),
+    ],
+)
+def test_generate_answers_local_selects_greedy_or_sampling_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+    temperature: float,
+    expected_generation_arguments: dict[str, object],
+) -> None:
+    tokenizer = FakeAnswerTokenizer(["Ответ."])
+    model = FakeAnswerModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    result = preparation.generate_answers_local(
+        ["Вопрос?"],
+        "Чанк.",
+        model_name="model",
+        temperature=temperature,
+        max_new_tokens=4,
+        device="cpu",
+    )
+
+    assert result == ["Ответ."]
+    generation_arguments = model.generation_arguments[0]
+    for name, value in expected_generation_arguments.items():
+        assert generation_arguments[name] == value
+    if temperature == 0:
+        assert "temperature" not in generation_arguments
+    assert "<additional_sources>\n[]\n</additional_sources>" in tokenizer.messages[0][-1]["content"]
+
+
+def test_generate_answers_api_creates_one_client_and_calls_once_per_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_arguments: list[dict[str, object]] = []
+    calls: list[dict[str, object]] = []
+    contents = iter(["Первый API-ответ.", " Второй API-ответ. "])
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=next(contents)))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            client_arguments.append(kwargs)
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+
+    result = preparation.generate_answers_api(
+        ["Первый?", "Второй?"],
+        "Чанк.",
+        model_name="provider/model",
+        api_key="secret",
+        base_url="https://example.test/v1",
+        additional_chunks_by_question=[[], ["Контекст."]],
+        temperature=0.2,
+        max_new_tokens=17,
+    )
+
+    assert result == ["Первый API-ответ.", "Второй API-ответ."]
+    assert client_arguments == [{"api_key": "secret", "base_url": "https://example.test/v1"}]
+    assert len(calls) == 2
+    assert all(
+        {name: call[name] for name in ("model", "temperature", "max_tokens")}
+        == {"model": "provider/model", "temperature": 0.2, "max_tokens": 17}
+        for call in calls
+    )
+    assert all("response_format" not in call and "extra_body" not in call for call in calls)
+    assert '"Первый?"' in calls[0]["messages"][-1]["content"]  # type: ignore[index]
+    assert '["Контекст."]' in calls[1]["messages"][-1]["content"]  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("questions", "not-a-sequence", "questions must be a sequence of strings"),
+        ("questions", ["Вопрос?", 1], r"questions\[1\] must be a string"),
+        ("chunk", 1, "chunk must be a string"),
+        ("model_name", 1, "model_name must be a string"),
+        ("prompt", 1, "prompt must be a string"),
+        ("temperature", True, "temperature must be a number"),
+        ("max_new_tokens", True, "max_new_tokens must be an integer"),
+        ("device", 1, "device must be a string or None"),
+        (
+            "additional_chunks_by_question",
+            "context",
+            "additional_chunks_by_question must be a sequence of string sequences or None",
+        ),
+        (
+            "additional_chunks_by_question",
+            [["Контекст."], "context"],
+            r"additional_chunks_by_question\[1\] must be a sequence of strings",
+        ),
+        (
+            "additional_chunks_by_question",
+            [["Контекст."], [1]],
+            r"additional_chunks_by_question\[1\]\[0\] must be a string",
+        ),
+    ],
+)
+def test_generate_answers_local_rejects_invalid_argument_types_before_loading_model(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+    arguments: dict[str, object] = {
+        "questions": ["Первый?", "Второй?"],
+        "chunk": "Чанк.",
+        "model_name": "model",
+        "max_new_tokens": 4,
+        "device": "cpu",
+        argument: value,
+    }
+
+    with pytest.raises(TypeError, match=message):
+        preparation.generate_answers_local(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"questions": []}, "questions must not be empty"),
+        ({"questions": ["  "]}, r"questions\[0\] must not be empty"),
+        ({"chunk": "  "}, "chunk must not be empty"),
+        ({"model_name": "  "}, "model_name must not be empty"),
+        ({"additional_chunks_by_question": [[]]}, "must contain one item per question"),
+        (
+            {"additional_chunks_by_question": [["Контекст."], ["  "]]},
+            r"additional_chunks_by_question\[1\]\[0\] must not be empty",
+        ),
+        (
+            {"prompt": "Question: {question}; chunk: {chunk}"},
+            r"prompt must contain \{question\}, \{chunk\}, and \{additional_chunks\}",
+        ),
+        ({"prompt": "{question} {chunk} {additional_chunks"}, "valid format string"),
+        (
+            {"prompt": ("{question} {chunk} {additional_chunks} {unsupported}")},
+            "prompt contains an unsupported placeholder: unsupported",
+        ),
+        ({"temperature": -0.1}, "temperature must be greater than or equal to zero"),
+        ({"temperature": float("nan")}, "temperature must be finite"),
+        ({"max_new_tokens": 0}, "max_new_tokens must be greater than zero"),
+    ],
+)
+def test_generate_answers_local_rejects_invalid_argument_values_before_loading_model(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+    call_arguments: dict[str, object] = {
+        "questions": ["Первый?", "Второй?"],
+        "chunk": "Чанк.",
+        "model_name": "model",
+        "additional_chunks_by_question": [[], []],
+        "max_new_tokens": 4,
+        "device": "cpu",
+        **arguments,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        preparation.generate_answers_local(**call_arguments)  # type: ignore[arg-type]
+
+
+def test_generate_answers_local_reports_question_index_on_context_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeAnswerTokenizer(["Первый."], prompt_lengths=[2, 7])
+    model = FakeAnswerModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 10),
+    )
+
+    with pytest.raises(ValueError, match=r"question 1.*model context window"):
+        preparation.generate_answers_local(
+            ["Первый?", "Второй?"],
+            "Чанк.",
+            model_name="model",
+            max_new_tokens=4,
+            device="cpu",
+        )
+
+    assert len(model.generation_arguments) == 1
+
+
+def test_generate_answers_local_requires_tokenizer_chat_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeAnswerTokenizer(["Ответ."])
+    model = FakeAnswerModel()
+
+    def reject_chat_template(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("Cannot use chat template functions")
+
+    tokenizer.apply_chat_template = reject_chat_template  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    with pytest.raises(ValueError, match=r"question 0.*tokenizer must define a chat template"):
+        preparation.generate_answers_local(
+            ["Вопрос?"], "Чанк.", model_name="model", max_new_tokens=4, device="cpu"
+        )
+
+
+@pytest.mark.parametrize("response", ["", "  "])
+def test_generate_answers_local_rejects_empty_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    response: str,
+) -> None:
+    tokenizer = FakeAnswerTokenizer([response])
+    model = FakeAnswerModel()
+    monkeypatch.setattr(
+        preparation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    with pytest.raises(ValueError, match=r"answer for question 0 must not be empty"):
+        preparation.generate_answers_local(
+            ["Вопрос?"], "Чанк.", model_name="model", max_new_tokens=4, device="cpu"
+        )
+
+
+def test_generate_answers_api_rejects_empty_message_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None))])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(ValueError, match=r"answer for question 0 must not be empty"):
+        preparation.generate_answers_api(["Вопрос?"], "Чанк.", model_name="model", api_key="key")
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "error_type", "message"),
+    [
+        ("api_key", 1, TypeError, "api_key must be a string"),
+        ("base_url", 1, TypeError, "base_url must be a string or None"),
+        ("api_key", "  ", ValueError, "api_key must not be empty"),
+        ("base_url", "  ", ValueError, "base_url must not be empty"),
+    ],
+)
+def test_generate_answers_api_rejects_invalid_client_arguments_before_creating_client(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    arguments: dict[str, object] = {
+        "questions": ["Вопрос?"],
+        "chunk": "Чанк.",
+        "model_name": "model",
+        "api_key": "key",
+        "base_url": None,
+        argument: value,
+    }
+
+    with pytest.raises(error_type, match=message):
+        preparation.generate_answers_api(**arguments)  # type: ignore[arg-type]
+
+
+def test_generate_answers_are_exported_from_package() -> None:
+    assert chunking_metrics.generate_answers_local is preparation.generate_answers_local
+    assert chunking_metrics.generate_answers_api is preparation.generate_answers_api
 
 
 def test_calculate_embeddings_returns_vector_for_single_text(

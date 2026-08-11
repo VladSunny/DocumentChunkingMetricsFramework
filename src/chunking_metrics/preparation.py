@@ -8,11 +8,13 @@ from typing import Any
 
 import numpy as np
 import torch
+from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from openai import OpenAI
 
 from .prompts import (
+    DEFAULT_ANSWER_PROMPT,
+    DEFAULT_ANSWER_SYSTEM_PROMPT,
     DEFAULT_QUESTION_PROMPT,
     DEFAULT_QUESTION_SYSTEM_PROMPT,
     DEFAULT_STATEMENT_PROMPT,
@@ -22,9 +24,6 @@ from .prompts import (
 DEFAULT_EMBEDDING_MODEL = "cointegrated/rubert-tiny2"
 DEFAULT_PERPLEXITY_MODEL = "ai-forever/rugpt3small_based_on_gpt2"
 DEFAULT_STATEMENT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-
-# TODO: generating using LLM API
-# OpenAI api
 
 _IGNORED_LABEL = -100
 _UNBOUNDED_MODEL_LENGTH = 1_000_000
@@ -326,6 +325,131 @@ def _parse_question_response(response: str, question_count: int) -> list[str]:
     return [question.strip() for question in questions]
 
 
+def _validate_answer_arguments(
+    questions: Sequence[str],
+    chunk: str,
+    model_name: str,
+    additional_chunks_by_question: Sequence[Sequence[str]] | None,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+    device: str | None,
+) -> tuple[list[str], list[list[str]]]:
+    if isinstance(questions, (str, bytes)) or not isinstance(questions, Sequence):
+        raise TypeError("questions must be a sequence of strings")
+    question_items = list(questions)
+    for index, question in enumerate(question_items):
+        if not isinstance(question, str):
+            raise TypeError(f"questions[{index}] must be a string")
+    if not isinstance(chunk, str):
+        raise TypeError("chunk must be a string")
+    if not isinstance(model_name, str):
+        raise TypeError("model_name must be a string")
+    if not isinstance(prompt, str):
+        raise TypeError("prompt must be a string")
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        raise TypeError("temperature must be a number")
+    if not isinstance(max_new_tokens, int) or isinstance(max_new_tokens, bool):
+        raise TypeError("max_new_tokens must be an integer")
+    if device is not None and not isinstance(device, str):
+        raise TypeError("device must be a string or None")
+    if additional_chunks_by_question is not None and (
+        isinstance(additional_chunks_by_question, (str, bytes))
+        or not isinstance(additional_chunks_by_question, Sequence)
+    ):
+        raise TypeError(
+            "additional_chunks_by_question must be a sequence of string sequences or None"
+        )
+
+    if not question_items:
+        raise ValueError("questions must not be empty")
+    for index, question in enumerate(question_items):
+        if not question.strip():
+            raise ValueError(f"questions[{index}] must not be empty")
+    if not chunk.strip():
+        raise ValueError("chunk must not be empty")
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
+    if not prompt.strip():
+        raise ValueError("prompt must not be empty")
+
+    if additional_chunks_by_question is None:
+        additional_chunk_items = [[] for _ in question_items]
+    else:
+        if len(additional_chunks_by_question) != len(question_items):
+            raise ValueError("additional_chunks_by_question must contain one item per question")
+        additional_chunk_items = []
+        for question_index, additional_chunks in enumerate(additional_chunks_by_question):
+            if isinstance(additional_chunks, (str, bytes)) or not isinstance(
+                additional_chunks, Sequence
+            ):
+                raise TypeError(
+                    f"additional_chunks_by_question[{question_index}] must be a sequence of strings"
+                )
+            chunk_items = list(additional_chunks)
+            for chunk_index, additional_chunk in enumerate(chunk_items):
+                if not isinstance(additional_chunk, str):
+                    raise TypeError(
+                        f"additional_chunks_by_question[{question_index}]"
+                        f"[{chunk_index}] must be a string"
+                    )
+                if not additional_chunk.strip():
+                    raise ValueError(
+                        f"additional_chunks_by_question[{question_index}]"
+                        f"[{chunk_index}] must not be empty"
+                    )
+            additional_chunk_items.append(chunk_items)
+
+    try:
+        prompt_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(prompt)
+            if field_name is not None
+        }
+    except ValueError as error:
+        raise ValueError("prompt must be a valid format string") from error
+    required_fields = {"question", "chunk", "additional_chunks"}
+    if not required_fields.issubset(prompt_fields):
+        raise ValueError("prompt must contain {question}, {chunk}, and {additional_chunks}")
+    unsupported_fields = prompt_fields - required_fields
+    if unsupported_fields:
+        unsupported_field = sorted(unsupported_fields)[0]
+        raise ValueError(f"prompt contains an unsupported placeholder: {unsupported_field}")
+    if not math.isfinite(temperature):
+        raise ValueError("temperature must be finite")
+    if temperature < 0:
+        raise ValueError("temperature must be greater than or equal to zero")
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be greater than zero")
+    return question_items, additional_chunk_items
+
+
+def _answer_messages(
+    question: str,
+    chunk: str,
+    additional_chunks: Sequence[str],
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(
+            question=json.dumps(question, ensure_ascii=False),
+            chunk=json.dumps(chunk, ensure_ascii=False),
+            additional_chunks=json.dumps(list(additional_chunks), ensure_ascii=False),
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {"role": "system", "content": DEFAULT_ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _clean_answer(response: object, question_index: int) -> str:
+    if not isinstance(response, str) or not response.strip():
+        raise ValueError(f"answer for question {question_index} must not be empty")
+    return response.strip()
+
+
 def _prefix_token_id(tokenizer: Any, model: Any) -> int:
     candidates = (
         getattr(tokenizer, "bos_token_id", None),
@@ -471,6 +595,169 @@ def calculate_embeddings(
         ),
         dtype=np.float32,
     )
+
+
+def generate_answers_local(
+    questions: Sequence[str],
+    chunk: str,
+    model_name: str = DEFAULT_STATEMENT_MODEL,
+    *,
+    additional_chunks_by_question: Sequence[Sequence[str]] | None = None,
+    prompt: str = DEFAULT_ANSWER_PROMPT,
+    temperature: float = 0.0,
+    max_new_tokens: int = 128,
+    device: str | None = None,
+) -> list[str]:
+    """Answer questions independently with a local causal chat model.
+
+    Args:
+        questions: Non-empty questions to answer, in output order.
+        chunk: Required primary source used for every question.
+        model_name: Hugging Face causal language model identifier or local model path. Its
+            tokenizer must define a chat template.
+        additional_chunks_by_question: Optional per-question sequences of extra sources. The
+            outer sequence must have the same length as ``questions``.
+        prompt: User-message format string containing ``{question}``, ``{chunk}``, and
+            ``{additional_chunks}`` placeholders. Values are inserted as JSON.
+        temperature: Non-negative generation temperature. Zero selects greedy decoding.
+        max_new_tokens: Maximum number of tokens generated for each answer.
+        device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override.
+
+    Returns:
+        One stripped, non-empty answer per question, preserving question order.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument is invalid, a prompt and response budget exceed the context
+            window, the tokenizer has no chat template, or an answer is empty.
+
+    The model is loaded once, but each question is generated independently without truncation or
+    retries.
+    """
+    question_items, additional_chunk_items = _validate_answer_arguments(
+        questions,
+        chunk,
+        model_name,
+        additional_chunks_by_question,
+        prompt,
+        temperature,
+        max_new_tokens,
+        device,
+    )
+    resolved_device = _resolve_device(device)
+    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
+    answers: list[str] = []
+    for index, (question, additional_chunks) in enumerate(
+        zip(question_items, additional_chunk_items, strict=True)
+    ):
+        messages = _answer_messages(question, chunk, additional_chunks, prompt)
+        try:
+            model_inputs = tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
+                return_dict=True,
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"question {index}: model tokenizer must define a chat template"
+            ) from error
+        model_inputs = {name: tensor.to(resolved_device) for name, tensor in model_inputs.items()}
+        prompt_length = model_inputs["input_ids"].shape[-1]
+        if prompt_length + max_new_tokens > max_length:
+            raise ValueError(
+                f"question {index} and generated answer do not fit within the model context window"
+            )
+
+        pad_token_id = tokenizer.pad_token_id
+        if pad_token_id is None:
+            pad_token_id = tokenizer.eos_token_id
+        generation_arguments: dict[str, Any] = {
+            **model_inputs,
+            "do_sample": temperature > 0,
+            "max_new_tokens": max_new_tokens,
+            "pad_token_id": pad_token_id,
+        }
+        if temperature > 0:
+            generation_arguments["temperature"] = temperature
+        with torch.inference_mode():
+            output_ids = model.generate(**generation_arguments)
+        response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
+        answers.append(_clean_answer(response, index))
+    return answers
+
+
+def generate_answers_api(
+    questions: Sequence[str],
+    chunk: str,
+    model_name: str,
+    api_key: str,
+    base_url: str | None = None,
+    *,
+    additional_chunks_by_question: Sequence[Sequence[str]] | None = None,
+    prompt: str = DEFAULT_ANSWER_PROMPT,
+    temperature: float = 0.0,
+    max_new_tokens: int = 128,
+) -> list[str]:
+    """Answer questions independently through OpenAI-compatible Chat Completions.
+
+    Args:
+        questions: Non-empty questions to answer, in output order.
+        chunk: Required primary source used for every question.
+        model_name: Model identifier understood by the API provider.
+        api_key: API key passed to the OpenAI-compatible client.
+        base_url: Optional OpenAI-compatible API base URL.
+        additional_chunks_by_question: Optional per-question sequences of extra sources. The
+            outer sequence must have the same length as ``questions``.
+        prompt: User-message format string containing ``{question}``, ``{chunk}``, and
+            ``{additional_chunks}`` placeholders. Values are inserted as JSON.
+        temperature: Non-negative generation temperature.
+        max_new_tokens: Maximum number of tokens generated for each answer.
+
+    Returns:
+        One stripped, non-empty answer per question, preserving question order.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument is invalid or an API response has empty message content.
+
+    A single client is reused for sequential, independent calls. The function does not retry and
+    does not return partial results.
+    """
+    if not isinstance(api_key, str):
+        raise TypeError("api_key must be a string")
+    if base_url is not None and not isinstance(base_url, str):
+        raise TypeError("base_url must be a string or None")
+    question_items, additional_chunk_items = _validate_answer_arguments(
+        questions,
+        chunk,
+        model_name,
+        additional_chunks_by_question,
+        prompt,
+        temperature,
+        max_new_tokens,
+        None,
+    )
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if base_url is not None and not base_url.strip():
+        raise ValueError("base_url must not be empty")
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    answers: list[str] = []
+    for index, (question, additional_chunks) in enumerate(
+        zip(question_items, additional_chunk_items, strict=True)
+    ):
+        response = client.chat.completions.create(
+            model=model_name.strip(),
+            messages=_answer_messages(question, chunk, additional_chunks, prompt),
+            stream=False,
+            temperature=temperature,
+            max_tokens=max_new_tokens,
+        )
+        answers.append(_clean_answer(response.choices[0].message.content, index))
+    return answers
 
 
 def generate_statements_local(
@@ -720,9 +1007,9 @@ def generate_questions_api(
     """
 
     messages = _question_messages(chunk, question_count, prompt)
-    
+
     client = OpenAI(api_key=api_key, base_url=base_url)
-    
+
     response = client.chat.completions.create(
         model=model_name,
         messages=messages,
@@ -737,4 +1024,3 @@ def generate_questions_api(
     content = response.choices[0].message.content
 
     return _parse_question_response(content, question_count)
-

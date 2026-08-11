@@ -16,7 +16,7 @@ Five of the eleven metrics in the project plan are currently implemented:
 - [x] [Boundary Clarity (BC)](docs/chunking_metrics.md#6-boundary-clarity-bc) — `boundary_clarity`
 - [ ] [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
 - [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity) — `concept_unity`
-- [ ] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
+- [x] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
 - [ ] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
 - [ ] [HOPE Aggregate](docs/chunking_metrics.md#11-hope-aggregate)
 

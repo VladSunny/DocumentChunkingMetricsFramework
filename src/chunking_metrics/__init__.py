@@ -10,10 +10,12 @@ from .preparation import (
     DEFAULT_STATEMENT_MODEL,
     calculate_embeddings,
     calculate_perplexity,
+    generate_answers_api,
+    generate_answers_local,
+    generate_questions_api,
     generate_questions_local,
     generate_statements_api,
     generate_statements_local,
-    generate_questions_api
 )
 
 __all__ = [
@@ -23,10 +25,12 @@ __all__ = [
     "calculate_perplexity",
     "concept_unity",
     "contextual_coherence",
+    "generate_answers_api",
+    "generate_answers_local",
+    "generate_questions_api",
     "generate_questions_local",
     "generate_statements_api",
     "generate_statements_local",
-    "generate_questions_api",
     "intrachunk_cohesion",
     "semantic_independence",
     "size_compliance",
