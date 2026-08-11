@@ -1,10 +1,7 @@
 import numpy as np
 
-from chunking_metrics import (
-    calculate_embeddings,
-    generate_answers_local,
-    semantic_independence,
-)
+from chunking_metrics.metrics import semantic_independence
+from chunking_metrics.preparation import calculate_embeddings, generate_answers_local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "

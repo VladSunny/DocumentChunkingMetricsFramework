@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from chunking_metrics import calculate_perplexity
+from chunking_metrics.preparation import calculate_perplexity
 
 load_dotenv()
 

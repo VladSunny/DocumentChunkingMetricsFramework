@@ -1,7 +1,8 @@
 import numpy as np
 from dotenv import load_dotenv
 
-from chunking_metrics import calculate_embeddings, concept_unity, generate_statements_local
+from chunking_metrics.metrics import concept_unity
+from chunking_metrics.preparation import calculate_embeddings, generate_statements_local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "

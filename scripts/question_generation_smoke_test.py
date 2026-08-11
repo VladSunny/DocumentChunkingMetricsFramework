@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from chunking_metrics import generate_questions_local
+from chunking_metrics.preparation import generate_questions_local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "

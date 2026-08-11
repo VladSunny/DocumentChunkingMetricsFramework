@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 import torch
 
-import chunking_metrics
-from chunking_metrics import calculate_perplexity, preparation
+import chunking_metrics.preparation as preparation
+import chunking_metrics.prompts as prompts
+from chunking_metrics.preparation import calculate_perplexity
 
 
 class FakeTokenizer:
@@ -426,7 +427,7 @@ def test_generate_statements_rejects_response_outside_strict_json_contract(
         )
 
 
-def test_generate_statements_is_exported_from_package(
+def test_generate_statements_is_available_from_preparation_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
@@ -437,7 +438,7 @@ def test_generate_statements_is_exported_from_package(
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = chunking_metrics.generate_statements_local(
+    result = preparation.generate_statements_local(
         "Текст чанка.",
         model_name="model",
         statement_count=2,
@@ -446,7 +447,7 @@ def test_generate_statements_is_exported_from_package(
     )
 
     assert result == ["Первое.", "Второе."]
-    assert chunking_metrics.DEFAULT_STATEMENT_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
+    assert preparation.DEFAULT_STATEMENT_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
 
 
 def test_generate_information_preservation_statements_api_returns_labeled_statements(
@@ -498,7 +499,7 @@ def test_generate_information_preservation_statements_api_returns_labeled_statem
     assert calls[0]["response_format"] == {"type": "json_object"}
     assert calls[0]["messages"][0] == {  # type: ignore[index]
         "role": "system",
-        "content": chunking_metrics.DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
+        "content": prompts.DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
     }
     assert (
         '<source>\n"Three sentence segment."\n</source>'
@@ -604,16 +605,6 @@ def test_generate_information_preservation_statements_api_rejects_invalid_argume
         preparation.generate_information_preservation_statements_api(  # type: ignore[arg-type]
             **arguments
         )
-
-
-def test_generate_information_preservation_statements_api_is_exported() -> None:
-    generate = getattr(preparation, "generate_information_preservation_statements_api", None)
-
-    assert callable(generate)
-    assert (
-        getattr(chunking_metrics, "generate_information_preservation_statements_api", None)
-        is generate
-    )
 
 
 def test_generate_questions_returns_exact_cleaned_json_questions(
@@ -844,7 +835,9 @@ def test_generate_questions_rejects_response_outside_strict_json_contract(
         )
 
 
-def test_generate_questions_is_exported_from_package(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generate_questions_is_available_from_preparation_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tokenizer = FakeStatementTokenizer('["Первый?", "Второй?"]')
     model = FakeStatementModel()
     monkeypatch.setattr(
@@ -853,7 +846,7 @@ def test_generate_questions_is_exported_from_package(monkeypatch: pytest.MonkeyP
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = chunking_metrics.generate_questions_local(
+    result = preparation.generate_questions_local(
         "Текст чанка.",
         model_name="model",
         question_count=2,
@@ -1201,11 +1194,6 @@ def test_generate_answers_api_rejects_invalid_client_arguments_before_creating_c
         preparation.generate_answers_api(**arguments)  # type: ignore[arg-type]
 
 
-def test_generate_answers_are_exported_from_package() -> None:
-    assert chunking_metrics.generate_answers_local is preparation.generate_answers_local
-    assert chunking_metrics.generate_answers_api is preparation.generate_answers_api
-
-
 def test_calculate_embeddings_returns_vector_for_single_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1367,7 +1355,7 @@ def test_calculate_embeddings_warns_when_texts_are_truncated(
     assert result.shape == (3, 2)
 
 
-def test_calculate_embeddings_is_exported_from_package(
+def test_calculate_embeddings_is_available_from_preparation_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = FakeEmbeddingModel()
@@ -1377,7 +1365,7 @@ def test_calculate_embeddings_is_exported_from_package(
         lambda model_name, device: model,
     )
 
-    result = chunking_metrics.calculate_embeddings(
+    result = preparation.calculate_embeddings(
         "text",
         model_name="model",
         device="cpu",

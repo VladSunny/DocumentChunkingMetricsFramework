@@ -1,10 +1,7 @@
 import numpy as np
 
-from chunking_metrics import (
-    calculate_embeddings,
-    contextual_coherence,
-    intrachunk_cohesion,
-)
+from chunking_metrics.metrics import contextual_coherence, intrachunk_cohesion
+from chunking_metrics.preparation import calculate_embeddings
 
 SENTENCES = [
     "Иван подписал договор на следующий день.",

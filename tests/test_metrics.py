@@ -1,15 +1,14 @@
 import numpy as np
 import pytest
 
-import chunking_metrics
-from chunking_metrics import (
+import chunking_metrics.metrics as metrics
+from chunking_metrics.metrics import (
     boundary_clarity,
+    concept_unity,
     contextual_coherence,
     intrachunk_cohesion,
-    metrics,
     size_compliance,
 )
-from chunking_metrics.metrics import concept_unity
 
 
 def test_size_compliance() -> None:
@@ -105,10 +104,6 @@ def test_concept_unity_returns_zero_for_invalid_inputs(
     assert concept_unity(statements_embs) == 0.0
 
 
-def test_concept_unity_is_part_of_public_api() -> None:
-    assert chunking_metrics.concept_unity is concept_unity
-
-
 def test_semantic_independence_averages_clipped_paired_similarities() -> None:
     standalone_answer_embs = np.array([[1.0, 0.0], [1.0, 0.0]])
     contextual_answer_embs = np.array([[1.0, 0.0], [-1.0, 0.0]])
@@ -162,7 +157,3 @@ def test_semantic_independence_avoids_numeric_overflow(
         standalone_answer_embs,
         contextual_answer_embs,
     ) == pytest.approx(1.0)
-
-
-def test_semantic_independence_is_part_of_public_api() -> None:
-    assert chunking_metrics.semantic_independence is metrics.semantic_independence

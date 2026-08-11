@@ -89,13 +89,13 @@ python -m pip install -e ../DocumentChunkingMetricsFramework
 Import the package by its Python module name, `chunking_metrics`. Verify an `uv` installation with:
 
 ```bash
-uv run python -c "from chunking_metrics import size_compliance; print(size_compliance([100], 50, 150))"
+uv run python -c "from chunking_metrics.metrics import size_compliance; print(size_compliance([100], 50, 150))"
 ```
 
 For an activated `pip` environment, use the same check without the `uv run` prefix:
 
 ```bash
-python -c "from chunking_metrics import size_compliance; print(size_compliance([100], 50, 150))"
+python -c "from chunking_metrics.metrics import size_compliance; print(size_compliance([100], 50, 150))"
 ```
 
 ### Built wheel
@@ -126,7 +126,7 @@ python -m pip install ../DocumentChunkingMetricsFramework/dist/chunking_metrics-
 Size Compliance operates directly on precomputed chunk lengths and does not require a model:
 
 ```python
-from chunking_metrics import size_compliance
+from chunking_metrics.metrics import size_compliance
 
 chunk_lengths = [180, 240, 510, 320]
 score = size_compliance(chunk_lengths, min_size=200, max_size=500)
@@ -142,14 +142,16 @@ semantic and boundary metrics:
 ```python
 import numpy as np
 
-from chunking_metrics import (
+from chunking_metrics.metrics import (
     boundary_clarity,
-    calculate_embeddings,
-    calculate_perplexity,
     concept_unity,
     contextual_coherence,
-    generate_statements,
     intrachunk_cohesion,
+)
+from chunking_metrics.preparation import (
+    calculate_embeddings,
+    calculate_perplexity,
+    generate_statements_local,
 )
 
 sentence_groups = [
@@ -167,7 +169,7 @@ icc = intrachunk_cohesion(sentence_embeddings)
 dcc = contextual_coherence(chunk_embeddings[1], chunk_embeddings[[0, 2]])
 
 # HOPE Concept Unity uses statements generated from one chunk.
-statements = generate_statements(chunks[0])
+statements = generate_statements_local(chunks[0])
 statement_embeddings = calculate_embeddings(statements)
 cu = concept_unity(statement_embeddings)
 
@@ -196,6 +198,10 @@ The first invocation of each preparation helper may download its default model. 
 to a helper to use a different compatible Hugging Face model.
 
 ## Public API
+
+Import metrics from `chunking_metrics.metrics`, input-preparation helpers from
+`chunking_metrics.preparation`, and prompt constants from `chunking_metrics.prompts`. The package
+root exports these three modules rather than their individual members.
 
 ### Metrics
 
@@ -243,7 +249,9 @@ to a helper to use a different compatible Hugging Face model.
   custom_prompt = (
       "Return exactly {statement_count} short claims supported by {chunk} as a JSON array."
   )
-  statements = generate_statements(chunks[0], prompt=custom_prompt)
+  from chunking_metrics.preparation import generate_statements_local
+
+  statements = generate_statements_local(chunks[0], prompt=custom_prompt)
   ```
 
 - The default question prompt is also defined in `chunking_metrics.prompts`. A custom question
@@ -251,7 +259,9 @@ to a helper to use a different compatible Hugging Face model.
 
   ```python
   custom_prompt = "Return exactly {question_count} questions answerable from {chunk} as a JSON array."
-  questions = generate_questions(chunks[0], prompt=custom_prompt)
+  from chunking_metrics.preparation import generate_questions_local
+
+  questions = generate_questions_local(chunks[0], prompt=custom_prompt)
   ```
 
 - Preparation helpers reject invalid arguments with `TypeError` or `ValueError`. Metric functions

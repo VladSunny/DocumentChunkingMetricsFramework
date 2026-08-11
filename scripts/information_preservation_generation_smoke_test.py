@@ -4,7 +4,7 @@ import os
 
 from dotenv import load_dotenv
 
-from chunking_metrics import generate_information_preservation_statements_api
+from chunking_metrics.preparation import generate_information_preservation_statements_api
 
 SEGMENT = (
     "В 2024 году библиотека открыла новый читальный зал на втором этаже. "

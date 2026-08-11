@@ -3,13 +3,12 @@ import os
 import numpy as np
 from dotenv import load_dotenv
 
-from chunking_metrics import (
+from chunking_metrics.metrics import concept_unity, semantic_independence
+from chunking_metrics.preparation import (
     calculate_embeddings,
-    concept_unity,
     generate_answers_api,
     generate_questions_api,
     generate_statements_api,
-    semantic_independence,
 )
 
 CHUNK = (
