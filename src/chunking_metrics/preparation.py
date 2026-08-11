@@ -20,10 +20,10 @@ from .prompts import (
 
 DEFAULT_EMBEDDING_MODEL = "cointegrated/rubert-tiny2"
 DEFAULT_PERPLEXITY_MODEL = "ai-forever/rugpt3small_based_on_gpt2"
-DEFAULT_STATEMENT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_STATEMENT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 
 # TODO: generating using LLM API
-# OpenAI api standart
+# OpenAI api
 
 _IGNORED_LABEL = -100
 _UNBOUNDED_MODEL_LENGTH = 1_000_000

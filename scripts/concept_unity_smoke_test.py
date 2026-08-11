@@ -16,7 +16,7 @@ def main() -> None:
     statements = generate_statements(
         CHUNK,
         statement_count=STATEMENT_COUNT,
-        device="cpu",
+        # device="cpu",
     )
     statement_embeddings = calculate_embeddings(statements, device="cpu")
     score = concept_unity(statement_embeddings)
