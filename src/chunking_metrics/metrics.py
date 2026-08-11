@@ -194,3 +194,60 @@ def concept_unity(statements_embs: np.ndarray) -> float:
         return 0.0
 
     return float(np.mean(np.clip(similarities, 0.0, 1.0)))
+
+
+def semantic_independence(
+    standalone_answer_embs: np.ndarray,
+    contextual_answer_embs: np.ndarray,
+) -> float:
+    """Evaluate whether additional context changes answers derived from a chunk.
+
+    Args:
+        standalone_answer_embs: Answer embeddings produced from the chunk alone, with shape
+            ``(answers, embedding_dims)``.
+        contextual_answer_embs: Embeddings of the corresponding answers produced with additional
+            context, with the same shape as ``standalone_answer_embs``.
+
+    Returns:
+        The mean cosine similarity between corresponding answer embeddings, clipped to
+        ``[0.0, 1.0]``. Invalid, empty, or mismatched arrays produce ``0.0``.
+    """
+    if (
+        standalone_answer_embs.ndim != 2
+        or contextual_answer_embs.ndim != 2
+        or standalone_answer_embs.shape != contextual_answer_embs.shape
+        or min(standalone_answer_embs.shape) <= 0
+    ):
+        return 0.0
+    if (
+        not np.issubdtype(standalone_answer_embs.dtype, np.number)
+        or not np.issubdtype(contextual_answer_embs.dtype, np.number)
+        or np.iscomplexobj(standalone_answer_embs)
+        or np.iscomplexobj(contextual_answer_embs)
+    ):
+        return 0.0
+    if not np.all(np.isfinite(standalone_answer_embs)) or not np.all(
+        np.isfinite(contextual_answer_embs)
+    ):
+        return 0.0
+
+    floating_dtype = np.result_type(
+        standalone_answer_embs.dtype,
+        contextual_answer_embs.dtype,
+        np.float64,
+    )
+    standalone_embs = standalone_answer_embs.astype(floating_dtype, copy=False)
+    contextual_embs = contextual_answer_embs.astype(floating_dtype, copy=False)
+    standalone_scales = np.max(np.abs(standalone_embs), axis=1, keepdims=True)
+    contextual_scales = np.max(np.abs(contextual_embs), axis=1, keepdims=True)
+    if np.any(standalone_scales == 0) or np.any(contextual_scales == 0):
+        return 0.0
+
+    similarities = cosine_similarity(
+        standalone_embs / standalone_scales,
+        contextual_embs / contextual_scales,
+    )
+    if not np.all(np.isfinite(similarities)):
+        return 0.0
+
+    return float(np.mean(np.clip(similarities, 0.0, 1.0)))

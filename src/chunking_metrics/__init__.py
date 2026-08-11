@@ -3,6 +3,7 @@ from .metrics import (
     concept_unity,
     contextual_coherence,
     intrachunk_cohesion,
+    semantic_independence,
     size_compliance,
 )
 from .preparation import (
@@ -21,5 +22,6 @@ __all__ = [
     "contextual_coherence",
     "generate_statements",
     "intrachunk_cohesion",
+    "semantic_independence",
     "size_compliance",
 ]

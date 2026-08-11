@@ -6,6 +6,7 @@ from chunking_metrics import (
     boundary_clarity,
     contextual_coherence,
     intrachunk_cohesion,
+    metrics,
     size_compliance,
 )
 from chunking_metrics.metrics import concept_unity
@@ -106,3 +107,62 @@ def test_concept_unity_returns_zero_for_invalid_inputs(
 
 def test_concept_unity_is_part_of_public_api() -> None:
     assert chunking_metrics.concept_unity is concept_unity
+
+
+def test_semantic_independence_averages_clipped_paired_similarities() -> None:
+    standalone_answer_embs = np.array([[1.0, 0.0], [1.0, 0.0]])
+    contextual_answer_embs = np.array([[1.0, 0.0], [-1.0, 0.0]])
+
+    assert metrics.semantic_independence(
+        standalone_answer_embs,
+        contextual_answer_embs,
+    ) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("standalone_answer_embs", "contextual_answer_embs"),
+    [
+        (np.array([]), np.array([])),
+        (np.empty((0, 2)), np.empty((0, 2))),
+        (np.empty((2, 0)), np.empty((2, 0))),
+        (np.ones((1, 1, 1)), np.ones((1, 1, 1))),
+        (np.ones((1, 2)), np.ones((2, 2))),
+        (np.ones((1, 2)), np.ones((1, 3))),
+        (np.array([[0.0, 0.0]]), np.array([[1.0, 0.0]])),
+        (np.array([[1.0, 0.0]]), np.array([[0.0, 0.0]])),
+        (np.array([[np.nan, 0.0]]), np.array([[1.0, 0.0]])),
+        (np.array([[1.0, 0.0]]), np.array([[np.inf, 0.0]])),
+        (np.array([["not", "numeric"]]), np.array([[1.0, 0.0]])),
+        (np.array([[1.0, 0.0]]), np.array([["not", "numeric"]])),
+    ],
+)
+def test_semantic_independence_returns_zero_for_invalid_inputs(
+    standalone_answer_embs: np.ndarray,
+    contextual_answer_embs: np.ndarray,
+) -> None:
+    assert metrics.semantic_independence(standalone_answer_embs, contextual_answer_embs) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("standalone_answer_embs", "contextual_answer_embs"),
+    [
+        (np.array([[255, 255]], dtype=np.uint8), np.array([[255, 255]], dtype=np.uint8)),
+        (
+            np.array([[60_000, 60_000]], dtype=np.float16),
+            np.array([[60_000, 60_000]], dtype=np.float16),
+        ),
+        (np.array([[1e308, 1e308]]), np.array([[1e308, 1e308]])),
+    ],
+)
+def test_semantic_independence_avoids_numeric_overflow(
+    standalone_answer_embs: np.ndarray,
+    contextual_answer_embs: np.ndarray,
+) -> None:
+    assert metrics.semantic_independence(
+        standalone_answer_embs,
+        contextual_answer_embs,
+    ) == pytest.approx(1.0)
+
+
+def test_semantic_independence_is_part_of_public_api() -> None:
+    assert chunking_metrics.semantic_independence is metrics.semantic_independence
