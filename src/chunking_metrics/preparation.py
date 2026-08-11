@@ -15,6 +15,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from .prompts import (
     DEFAULT_ANSWER_PROMPT,
     DEFAULT_ANSWER_SYSTEM_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
     DEFAULT_QUESTION_PROMPT,
     DEFAULT_QUESTION_SYSTEM_PROMPT,
     DEFAULT_STATEMENT_PROMPT,
@@ -228,6 +230,116 @@ def _parse_statement_response(response: str, statement_count: int) -> list[str]:
     ):
         raise ValueError(error_message)
     return [statement.strip() for statement in statements]
+
+
+def _validate_information_preservation_arguments(
+    segment: str,
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+) -> None:
+    if not isinstance(segment, str):
+        raise TypeError("segment must be a string")
+    if not isinstance(model_name, str):
+        raise TypeError("model_name must be a string")
+    if not isinstance(api_key, str):
+        raise TypeError("api_key must be a string")
+    if base_url is not None and not isinstance(base_url, str):
+        raise TypeError("base_url must be a string or None")
+    if not isinstance(prompt, str):
+        raise TypeError("prompt must be a string")
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        raise TypeError("temperature must be a number")
+    if not isinstance(max_new_tokens, int) or isinstance(max_new_tokens, bool):
+        raise TypeError("max_new_tokens must be an integer")
+    if not segment.strip():
+        raise ValueError("segment must not be empty")
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if base_url is not None and not base_url.strip():
+        raise ValueError("base_url must not be empty")
+    if not prompt.strip():
+        raise ValueError("prompt must not be empty")
+    try:
+        prompt_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(prompt)
+            if field_name is not None
+        }
+    except ValueError as error:
+        raise ValueError("prompt must be a valid format string") from error
+    if "segment" not in prompt_fields:
+        raise ValueError("prompt must contain {segment}")
+    unsupported_fields = prompt_fields - {"segment"}
+    if unsupported_fields:
+        unsupported_field = sorted(unsupported_fields)[0]
+        raise ValueError(f"prompt contains an unsupported placeholder: {unsupported_field}")
+    if not math.isfinite(temperature):
+        raise ValueError("temperature must be finite")
+    if temperature <= 0:
+        raise ValueError("temperature must be greater than zero")
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be greater than zero")
+
+
+def _information_preservation_messages(
+    segment: str,
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(segment=json.dumps(segment, ensure_ascii=False))
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _parse_information_preservation_response(response: object) -> tuple[str, list[str]]:
+    error_message = (
+        "model response must be a JSON object with one non-empty true_statement and exactly "
+        "three distinct non-empty false_statements"
+    )
+    if not isinstance(response, str):
+        raise ValueError(error_message)
+    try:
+        statements = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if not isinstance(statements, dict) or set(statements) != {
+        "true_statement",
+        "false_statements",
+    }:
+        raise ValueError(error_message)
+
+    true_statement = statements["true_statement"]
+    false_statements = statements["false_statements"]
+    if (
+        not isinstance(true_statement, str)
+        or not true_statement.strip()
+        or not isinstance(false_statements, list)
+        or len(false_statements) != 3
+        or any(
+            not isinstance(statement, str) or not statement.strip()
+            for statement in false_statements
+        )
+    ):
+        raise ValueError(error_message)
+
+    true_statement = true_statement.strip()
+    false_statements = [statement.strip() for statement in false_statements]
+    if len(set(false_statements)) != 3 or true_statement in false_statements:
+        raise ValueError(error_message)
+    return true_statement, false_statements
 
 
 def _validate_question_arguments(
@@ -889,6 +1001,59 @@ def generate_statements_api(
     content = response.choices[0].message.content
 
     return _parse_statement_response(content, statement_count)
+
+
+def generate_information_preservation_statements_api(
+    segment: str,
+    model_name: str = "",
+    api_key: str = "",
+    base_url: str | None = None,
+    *,
+    prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT,
+    temperature: float = 0.7,
+    max_new_tokens: int = 256,
+) -> tuple[str, list[str]]:
+    """Generate one true and three false statements for HOPE Information Preservation.
+
+    Args:
+        segment: Source document segment from which the statements are generated.
+        model_name: OpenAI-compatible chat model identifier.
+        api_key: API key passed to the OpenAI-compatible client.
+        base_url: Optional OpenAI-compatible API base URL.
+        prompt: User-message format string containing the ``{segment}`` placeholder.
+        temperature: Positive non-zero sampling temperature.
+        max_new_tokens: Maximum number of tokens available for the JSON response.
+
+    Returns:
+        The non-empty true statement and a list of exactly three distinct non-empty false
+        statements.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument or the model response violates the required contract.
+    """
+    _validate_information_preservation_arguments(
+        segment,
+        model_name,
+        api_key,
+        base_url,
+        prompt,
+        temperature,
+        max_new_tokens,
+    )
+    messages = _information_preservation_messages(segment, prompt)
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        stream=False,
+        extra_body={"thinking": {"type": "disabled"}},
+        response_format={"type": "json_object"},
+        max_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+    content = response.choices[0].message.content
+    return _parse_information_preservation_response(content)
 
 
 def generate_questions_local(

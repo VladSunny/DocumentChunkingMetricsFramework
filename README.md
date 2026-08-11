@@ -18,7 +18,7 @@ Five of the eleven metrics in the project plan are currently implemented:
 - [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity) — `concept_unity`
 - [x] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
 - [ ] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
-- [ ] [HOPE Aggregate](docs/chunking_metrics.md#11-hope-aggregate)
+- [ ] [HOPE Aggregate](docs/chunking_metrics.md#11-hope-aggregate) Do by yourself :)
 
 A checked metric is implemented, exported from the package, and covered by tests. Functions that
 exist only as `NotImplementedError` placeholders are not considered implemented.

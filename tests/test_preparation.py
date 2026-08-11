@@ -449,6 +449,173 @@ def test_generate_statements_is_exported_from_package(
     assert chunking_metrics.DEFAULT_STATEMENT_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
 
 
+def test_generate_information_preservation_statements_api_returns_labeled_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_arguments: list[dict[str, object]] = []
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"true_statement":" True. ",'
+                                '"false_statements":[" False 1. ","False 2.","False 3."]}'
+                            )
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            client_arguments.append(kwargs)
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    generate = getattr(preparation, "generate_information_preservation_statements_api", None)
+
+    assert callable(generate)
+    result = generate(
+        "Three sentence segment.",
+        model_name="provider/model",
+        api_key="secret",
+        base_url="https://example.test/v1",
+        temperature=0.2,
+        max_new_tokens=128,
+    )
+
+    assert result == ("True.", ["False 1.", "False 2.", "False 3."])
+    assert client_arguments == [{"api_key": "secret", "base_url": "https://example.test/v1"}]
+    assert len(calls) == 1
+    assert calls[0]["model"] == "provider/model"
+    assert calls[0]["temperature"] == 0.2
+    assert calls[0]["max_tokens"] == 128
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert calls[0]["messages"][0] == {  # type: ignore[index]
+        "role": "system",
+        "content": chunking_metrics.DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
+    }
+    assert (
+        '<source>\n"Three sentence segment."\n</source>'
+        in calls[0]["messages"][1][  # type: ignore[index]
+            "content"
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "not JSON",
+        "[]",
+        '{"true_statement":"True.","false_statements":["F1.","F2.","F3."],"extra":1}',
+        '{"true_statement":"True."}',
+        '{"true_statement":"  ","false_statements":["F1.","F2.","F3."]}',
+        '{"true_statement":"True.","false_statements":["F1.","F2."]}',
+        '{"true_statement":"True.","false_statements":["F1.",2,"F3."]}',
+        '{"true_statement":"True.","false_statements":["F1.","F1.","F3."]}',
+        '{"true_statement":"True.","false_statements":["F1.","True.","F3."]}',
+        None,
+    ],
+)
+def test_generate_information_preservation_statements_api_rejects_invalid_response(
+    monkeypatch: pytest.MonkeyPatch,
+    response: object,
+) -> None:
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=response))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "model response must be a JSON object with one non-empty true_statement and "
+            "exactly three distinct non-empty false_statements"
+        ),
+    ):
+        preparation.generate_information_preservation_statements_api(
+            "Segment.", model_name="model", api_key="secret"
+        )
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "error_type", "message"),
+    [
+        ("segment", 1, TypeError, "segment must be a string"),
+        ("model_name", 1, TypeError, "model_name must be a string"),
+        ("api_key", 1, TypeError, "api_key must be a string"),
+        ("base_url", 1, TypeError, "base_url must be a string or None"),
+        ("prompt", 1, TypeError, "prompt must be a string"),
+        ("temperature", True, TypeError, "temperature must be a number"),
+        ("max_new_tokens", True, TypeError, "max_new_tokens must be an integer"),
+        ("segment", "  ", ValueError, "segment must not be empty"),
+        ("model_name", "  ", ValueError, "model_name must not be empty"),
+        ("api_key", "  ", ValueError, "api_key must not be empty"),
+        ("base_url", "  ", ValueError, "base_url must not be empty"),
+        ("prompt", "  ", ValueError, "prompt must not be empty"),
+        ("prompt", "No placeholder.", ValueError, r"prompt must contain \{segment\}"),
+        ("prompt", "{segment", ValueError, "prompt must be a valid format string"),
+        ("prompt", "{segment:d}", ValueError, "prompt must be a valid format string"),
+        (
+            "prompt",
+            "{segment} {unknown}",
+            ValueError,
+            "prompt contains an unsupported placeholder: unknown",
+        ),
+        ("temperature", 0, ValueError, "temperature must be greater than zero"),
+        ("temperature", float("nan"), ValueError, "temperature must be finite"),
+        ("max_new_tokens", 0, ValueError, "max_new_tokens must be greater than zero"),
+    ],
+)
+def test_generate_information_preservation_statements_api_rejects_invalid_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    arguments: dict[str, object] = {
+        "segment": "Segment.",
+        "model_name": "model",
+        "api_key": "secret",
+        "base_url": None,
+        argument: value,
+    }
+
+    with pytest.raises(error_type, match=message):
+        preparation.generate_information_preservation_statements_api(  # type: ignore[arg-type]
+            **arguments
+        )
+
+
+def test_generate_information_preservation_statements_api_is_exported() -> None:
+    generate = getattr(preparation, "generate_information_preservation_statements_api", None)
+
+    assert callable(generate)
+    assert (
+        getattr(chunking_metrics, "generate_information_preservation_statements_api", None)
+        is generate
+    )
+
+
 def test_generate_questions_returns_exact_cleaned_json_questions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
