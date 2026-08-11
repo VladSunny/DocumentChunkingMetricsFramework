@@ -680,3 +680,61 @@ def generate_questions_local(
     response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
     print(response)
     return _parse_question_response(response, question_count)
+
+
+def generate_questions_api(
+    chunk: str,
+    model_name: str = "",
+    api_key: str = "",
+    base_url: str = "",
+    *,
+    prompt: str = DEFAULT_QUESTION_PROMPT,
+    question_count: int = 5,
+    temperature: float = 0.7,
+    max_new_tokens: int = 256,
+) -> list[str]:
+    """Generate questions answerable from one text chunk with a causal chat model.
+
+    Args:
+        chunk: Source text from which the questions are generated.
+        model_name: Hugging Face causal language model identifier or local model path. Its
+            tokenizer must define a chat template.
+        prompt: Format string used for the user message. It must contain ``{chunk}`` and
+            ``{question_count}`` placeholders. Escape literal braces by doubling them.
+        question_count: Exact number of questions required in the model response.
+        temperature: Positive non-zero sampling temperature used to encourage question diversity.
+        max_new_tokens: Maximum number of tokens available for the JSON response.
+        device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
+            CUDA is preferred, followed by MPS and CPU.
+
+    Returns:
+        A list containing exactly ``question_count`` non-empty questions.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument is invalid, the prompt and response budget do not fit the
+            context window, the tokenizer has no chat template, or the model response is not a
+            JSON array containing exactly the requested number of non-empty strings.
+
+    Generation is stochastic and happens once without retries. The chunk is never truncated.
+    """
+
+    messages = _question_messages(chunk, question_count, prompt)
+    
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        stream=False,
+        # reasoning_effort="low",
+        extra_body={"thinking": {"type": "disabled"}},
+        response_format={"type": "json_object"},
+        max_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+
+    content = response.choices[0].message.content
+
+    return _parse_question_response(content, question_count)
+

@@ -13,6 +13,7 @@ from .preparation import (
     generate_questions_local,
     generate_statements_api,
     generate_statements_local,
+    generate_questions_api
 )
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "generate_questions_local",
     "generate_statements_api",
     "generate_statements_local",
+    "generate_questions_api",
     "intrachunk_cohesion",
     "semantic_independence",
     "size_compliance",
