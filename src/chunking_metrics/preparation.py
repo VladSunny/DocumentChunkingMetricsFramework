@@ -709,6 +709,77 @@ def calculate_embeddings(
     )
 
 
+def retrieve_relevant_chunks(
+    queries: Sequence[str],
+    candidate_chunks: Sequence[str],
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+    *,
+    top_k: int = 3,
+    device: str | None = None,
+    batch_size: int = 32,
+) -> list[list[str]]:
+    """Retrieve the most relevant candidate chunks for each query using embeddings.
+
+    Args:
+        queries: Non-empty retrieval queries, such as questions or factual statements.
+        candidate_chunks: Non-empty chunks to rank independently for every query.
+        model_name: Hugging Face Sentence Transformers model identifier or local model path.
+        top_k: Maximum number of chunks returned per query.
+        device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override.
+        batch_size: Number of texts encoded in one inference batch.
+
+    Returns:
+        One list of candidate chunks per query, ordered by decreasing cosine similarity.
+        When fewer than ``top_k`` candidates are available, all candidates are returned.
+        Equal similarities preserve the original candidate order.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If a sequence or string is empty, or a numeric argument is not positive.
+
+    Query and candidate embeddings are calculated together in one model call. Callers are
+    responsible for excluding a primary chunk when HOPE Semantic Independence requires retrieval
+    only from the other chunks in the document.
+    """
+    if isinstance(queries, (str, bytes)) or not isinstance(queries, Sequence):
+        raise TypeError("queries must be a sequence of strings")
+    if isinstance(candidate_chunks, (str, bytes)) or not isinstance(candidate_chunks, Sequence):
+        raise TypeError("candidate_chunks must be a sequence of strings")
+    if not isinstance(top_k, int) or isinstance(top_k, bool):
+        raise TypeError("top_k must be an integer")
+
+    query_items = list(queries)
+    candidate_items = list(candidate_chunks)
+    if not query_items:
+        raise ValueError("queries must not be empty")
+    if not candidate_items:
+        raise ValueError("candidate_chunks must not be empty")
+    for index, query in enumerate(query_items):
+        if not isinstance(query, str):
+            raise TypeError(f"queries[{index}] must be a string")
+        if not query.strip():
+            raise ValueError(f"queries[{index}] must not be empty")
+    for index, candidate_chunk in enumerate(candidate_items):
+        if not isinstance(candidate_chunk, str):
+            raise TypeError(f"candidate_chunks[{index}] must be a string")
+        if not candidate_chunk.strip():
+            raise ValueError(f"candidate_chunks[{index}] must not be empty")
+    if top_k <= 0:
+        raise ValueError("top_k must be greater than zero")
+
+    query_count = len(query_items)
+    embeddings = calculate_embeddings(
+        [*query_items, *candidate_items],
+        model_name,
+        device=device,
+        batch_size=batch_size,
+    )
+    similarities = embeddings[:query_count] @ embeddings[query_count:].T
+    retrieved_count = min(top_k, len(candidate_items))
+    ranked_indices = np.argsort(-similarities, axis=1, kind="stable")[:, :retrieved_count]
+    return [[candidate_items[index] for index in query_indices] for query_indices in ranked_indices]
+
+
 def generate_answers_local(
     questions: Sequence[str],
     chunk: str,

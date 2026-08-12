@@ -1375,6 +1375,159 @@ def test_calculate_embeddings_is_available_from_preparation_module(
     assert result.shape == (2,)
 
 
+def test_retrieve_relevant_chunks_ranks_candidates_for_each_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], str, str | None, int]] = []
+
+    def calculate_embeddings(
+        texts: list[str],
+        model_name: str,
+        *,
+        device: str | None,
+        batch_size: int,
+    ) -> np.ndarray:
+        calls.append((texts, model_name, device, batch_size))
+        return np.array(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.8, 0.6],
+                [0.0, 1.0],
+                [1.0, 0.0],
+                [-1.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+
+    monkeypatch.setattr(preparation, "calculate_embeddings", calculate_embeddings)
+
+    result = preparation.retrieve_relevant_chunks(
+        ["query-a", "query-b"],
+        ["chunk-a", "chunk-b", "chunk-c", "chunk-d"],
+        model_name="model",
+        device="cpu",
+        batch_size=4,
+    )
+
+    assert result == [
+        ["chunk-c", "chunk-a", "chunk-b"],
+        ["chunk-b", "chunk-a", "chunk-c"],
+    ]
+    assert calls == [
+        (
+            ["query-a", "query-b", "chunk-a", "chunk-b", "chunk-c", "chunk-d"],
+            "model",
+            "cpu",
+            4,
+        )
+    ]
+
+
+def test_retrieve_relevant_chunks_returns_all_candidates_and_preserves_tie_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "calculate_embeddings",
+        lambda *args, **kwargs: np.array(
+            [
+                [1.0, 0.0],
+                [0.5, 0.5],
+                [0.5, 0.5],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+    result = preparation.retrieve_relevant_chunks(
+        ["query"],
+        ["first", "second"],
+        top_k=3,
+    )
+
+    assert result == [["first", "second"]]
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "error_type", "message"),
+    [
+        ("queries", "query", TypeError, "queries must be a sequence of strings"),
+        ("queries", ["query", 1], TypeError, r"queries\[1\] must be a string"),
+        (
+            "candidate_chunks",
+            "chunk",
+            TypeError,
+            "candidate_chunks must be a sequence of strings",
+        ),
+        (
+            "candidate_chunks",
+            ["chunk", 1],
+            TypeError,
+            r"candidate_chunks\[1\] must be a string",
+        ),
+        ("top_k", 1.5, TypeError, "top_k must be an integer"),
+        ("top_k", True, TypeError, "top_k must be an integer"),
+    ],
+)
+def test_retrieve_relevant_chunks_rejects_invalid_argument_types_before_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "calculate_embeddings",
+        lambda *args, **kwargs: pytest.fail("embeddings must not be calculated"),
+    )
+    arguments: dict[str, object] = {
+        "queries": ["query"],
+        "candidate_chunks": ["chunk"],
+        argument: value,
+    }
+
+    with pytest.raises(error_type, match=message):
+        preparation.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("queries", [], "queries must not be empty"),
+        ("queries", ["query", "  "], r"queries\[1\] must not be empty"),
+        ("candidate_chunks", [], "candidate_chunks must not be empty"),
+        (
+            "candidate_chunks",
+            ["chunk", "\t"],
+            r"candidate_chunks\[1\] must not be empty",
+        ),
+        ("top_k", 0, "top_k must be greater than zero"),
+        ("top_k", -1, "top_k must be greater than zero"),
+    ],
+)
+def test_retrieve_relevant_chunks_rejects_invalid_values_before_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "calculate_embeddings",
+        lambda *args, **kwargs: pytest.fail("embeddings must not be calculated"),
+    )
+    arguments: dict[str, object] = {
+        "queries": ["query"],
+        "candidate_chunks": ["chunk"],
+        argument: value,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        preparation.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
+
+
 def test_calculate_perplexity_rejects_empty_text() -> None:
     with pytest.raises(ValueError, match="text must not be empty"):
         calculate_perplexity("")

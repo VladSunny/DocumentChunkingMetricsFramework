@@ -1,7 +1,11 @@
 import numpy as np
 
 from chunking_metrics.metrics import semantic_independence
-from chunking_metrics.preparation import calculate_embeddings, generate_answers_local
+from chunking_metrics.preparation import (
+    calculate_embeddings,
+    generate_answers_local,
+    retrieve_relevant_chunks,
+)
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "
@@ -11,18 +15,21 @@ QUESTIONS = [
     "Для чего документ делят на фрагменты?",
     "Что помогает векторной модели точнее кодировать содержание фрагмента?",
 ]
-ADDITIONAL_CHUNKS_BY_QUESTION = [
-    ["Полученные фрагменты индексируют и находят по запросу пользователя."],
-    ["Семантически связанный текст обычно образует более устойчивое представление."],
+CANDIDATE_CHUNKS = [
+    "Полученные фрагменты индексируют и находят по запросу пользователя.",
+    "Семантически связанный текст обычно образует более устойчивое представление.",
+    "Дополнительный контекст может уточнить смысл найденного фрагмента.",
+    "Размер чанка влияет на количество текста, передаваемого языковой модели.",
 ]
 
 
 def main() -> None:
+    additional_chunks_by_question = retrieve_relevant_chunks(QUESTIONS, CANDIDATE_CHUNKS)
     standalone_answers = generate_answers_local(QUESTIONS, CHUNK)
     contextual_answers = generate_answers_local(
         QUESTIONS,
         CHUNK,
-        additional_chunks_by_question=ADDITIONAL_CHUNKS_BY_QUESTION,
+        additional_chunks_by_question=additional_chunks_by_question,
     )
     standalone_embeddings = calculate_embeddings(standalone_answers, device="cpu")
     contextual_embeddings = calculate_embeddings(contextual_answers, device="cpu")

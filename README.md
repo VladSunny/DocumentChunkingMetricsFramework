@@ -147,11 +147,15 @@ from chunking_metrics.metrics import (
     concept_unity,
     contextual_coherence,
     intrachunk_cohesion,
+    semantic_independence,
 )
 from chunking_metrics.preparation import (
     calculate_embeddings,
     calculate_perplexity,
+    generate_answers_local,
+    generate_questions_local,
     generate_statements_local,
+    retrieve_relevant_chunks,
 )
 
 sentence_groups = [
@@ -173,6 +177,20 @@ statements = generate_statements_local(chunks[0])
 statement_embeddings = calculate_embeddings(statements)
 cu = concept_unity(statement_embeddings)
 
+# HOPE Semantic Independence retrieves other document chunks for each generated question.
+questions = generate_questions_local(chunks[0])
+additional_chunks = retrieve_relevant_chunks(questions, chunks[1:])
+standalone_answers = generate_answers_local(questions, chunks[0])
+contextual_answers = generate_answers_local(
+    questions,
+    chunks[0],
+    additional_chunks_by_question=additional_chunks,
+)
+si = semantic_independence(
+    calculate_embeddings(standalone_answers),
+    calculate_embeddings(contextual_answers),
+)
+
 # BC expects one unconditional perplexity per chunk and one conditional
 # perplexity for every chunk after the first.
 unconditional = np.array([calculate_perplexity(chunk) for chunk in chunks])
@@ -189,6 +207,7 @@ print(
         "intrachunk_cohesion": icc,
         "contextual_coherence": dcc,
         "concept_unity": cu,
+        "semantic_independence": si,
         "boundary_clarity": bc,
     }
 )
@@ -212,12 +231,14 @@ root exports these three modules rather than their individual members.
 | `contextual_coherence(chunk_embs, context_embs)` | One `(embedding_dim,)` chunk vector and an `(item_count, embedding_dim)` context matrix | Cosine similarity between the chunk and mean context vector |
 | `boundary_clarity(uncond_ppls, cond_ppls)` | `K` unconditional and `K - 1` preceding-context-conditioned perplexities | Mean conditional-to-unconditional perplexity ratio |
 | `concept_unity(statements_embs)` | One `(statement_count, embedding_dim)` matrix | Mean clipped pairwise cosine similarity between generated statements |
+| `semantic_independence(standalone_answer_embs, contextual_answer_embs)` | Corresponding answer-embedding matrices | Mean clipped cosine similarity between standalone and contextual answers |
 
 ### Input preparation
 
 | Function | Purpose | Returns |
 | --- | --- | --- |
 | `calculate_embeddings(texts, model_name=..., device=None, batch_size=32)` | Encode one text or a sequence with a Sentence Transformers model | A normalized `float32` vector or matrix |
+| `retrieve_relevant_chunks(queries, candidate_chunks, model_name=..., top_k=3, device=None, batch_size=32)` | Rank candidate chunks for each query by embedding cosine similarity | Up to `top_k` chunks per query in relevance order |
 | `calculate_perplexity(text, model_name=..., context=None, device=None)` | Score target text with an optional preceding context excluded from the loss | Causal-language-model perplexity as `float` |
 | `generate_questions(chunk, model_name=..., prompt=..., question_count=5, temperature=0.7, max_new_tokens=256, device=None)` | Generate an exact number of questions answerable from one chunk | A list of `question_count` non-empty strings |
 | `generate_statements(chunk, model_name=..., prompt=..., statement_count=5, temperature=0.7, max_new_tokens=256, device=None)` | Extract an exact number of factual statements from one chunk | A list of `statement_count` non-empty strings |
