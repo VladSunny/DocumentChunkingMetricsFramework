@@ -607,6 +607,293 @@ def test_generate_information_preservation_statements_api_rejects_invalid_argume
         )
 
 
+def test_evaluate_information_preservation_api_returns_one_and_sends_exact_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_arguments: list[dict[str, object]] = []
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"selected_index": 3}'))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            client_arguments.append(kwargs)
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    true_statement = "True."
+    false_statements = ["False 1.", "False 2.", "False 3."]
+    relevant_chunks = ["Chunk one.", "Chunk two."]
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+
+    result = preparation.evaluate_information_preservation_api(
+        true_statement,
+        false_statements,
+        relevant_chunks,
+        model_name="provider/model",
+        api_key="secret",
+        base_url="https://example.test/v1",
+        prompt="Options: {statements}\nChunks: {relevant_chunks}",
+        temperature=0.2,
+        max_new_tokens=17,
+        seed=7,
+    )
+
+    assert result == 1
+    assert false_statements == ["False 1.", "False 2.", "False 3."]
+    assert relevant_chunks == ["Chunk one.", "Chunk two."]
+    assert client_arguments == [{"api_key": "secret", "base_url": "https://example.test/v1"}]
+    assert calls == [
+        {
+            "model": "provider/model",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": prompts.DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        'Options: [{"index": 1, "statement": "False 3."}, '
+                        '{"index": 2, "statement": "False 1."}, '
+                        '{"index": 3, "statement": "True."}, '
+                        '{"index": 4, "statement": "False 2."}]\n'
+                        'Chunks: ["Chunk one.", "Chunk two."]'
+                    ),
+                },
+            ],
+            "stream": False,
+            "extra_body": {"thinking": {"type": "disabled"}},
+            "response_format": {"type": "json_object"},
+            "max_tokens": 17,
+            "temperature": 0.2,
+        }
+    ]
+
+
+def test_evaluate_information_preservation_api_returns_zero_for_false_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"selected_index": 1}'))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+
+    result = preparation.evaluate_information_preservation_api(
+        "True.",
+        ["False 1.", "False 2.", "False 3."],
+        ["Relevant chunk."],
+        model_name="model",
+        api_key="secret",
+        seed=7,
+    )
+
+    assert result == 0
+
+
+def test_evaluate_information_preservation_api_repeats_order_for_same_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_messages: list[str] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            user_messages.append(kwargs["messages"][-1]["content"])  # type: ignore[index]
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"selected_index": 1}'))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    arguments = {
+        "true_statement": "True.",
+        "false_statements": ["False 1.", "False 2.", "False 3."],
+        "relevant_chunks": ["Relevant chunk."],
+        "model_name": "model",
+        "api_key": "secret",
+        "seed": 7,
+    }
+
+    preparation.evaluate_information_preservation_api(**arguments)
+    preparation.evaluate_information_preservation_api(**arguments)
+
+    assert user_messages[0] == user_messages[1]
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("true_statement", 1, "true_statement must be a string"),
+        ("false_statements", "false", "false_statements must be a sequence of strings"),
+        ("false_statements", ["F1.", 2, "F3."], r"false_statements\[1\] must be a string"),
+        ("relevant_chunks", "chunk", "relevant_chunks must be a sequence of strings"),
+        ("relevant_chunks", [1], r"relevant_chunks\[0\] must be a string"),
+        ("model_name", 1, "model_name must be a string"),
+        ("api_key", 1, "api_key must be a string"),
+        ("base_url", 1, "base_url must be a string or None"),
+        ("prompt", 1, "prompt must be a string"),
+        ("temperature", True, "temperature must be a number"),
+        ("max_new_tokens", True, "max_new_tokens must be an integer"),
+        ("seed", True, "seed must be an integer or None"),
+        ("seed", 1.5, "seed must be an integer or None"),
+    ],
+)
+def test_evaluate_information_preservation_api_rejects_invalid_types_before_client(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    arguments: dict[str, object] = {
+        "true_statement": "True.",
+        "false_statements": ["F1.", "F2.", "F3."],
+        "relevant_chunks": ["Chunk."],
+        "model_name": "model",
+        "api_key": "secret",
+        argument: value,
+    }
+
+    with pytest.raises(TypeError, match=message):
+        preparation.evaluate_information_preservation_api(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"true_statement": "  "}, "true_statement must not be empty"),
+        ({"false_statements": []}, "false_statements must contain exactly three statements"),
+        (
+            {"false_statements": ["F1.", "F2."]},
+            "false_statements must contain exactly three statements",
+        ),
+        (
+            {"false_statements": ["F1.", "F2.", "F3.", "F4."]},
+            "false_statements must contain exactly three statements",
+        ),
+        (
+            {"false_statements": ["F1.", "  ", "F3."]},
+            r"false_statements\[1\] must not be empty",
+        ),
+        (
+            {"false_statements": ["F1.", "F1. ", "F3."]},
+            "false_statements must be distinct",
+        ),
+        (
+            {"false_statements": ["F1.", "True. ", "F3."]},
+            "false_statements must not contain true_statement",
+        ),
+        ({"relevant_chunks": []}, "relevant_chunks must not be empty"),
+        ({"relevant_chunks": ["  "]}, r"relevant_chunks\[0\] must not be empty"),
+        ({"model_name": "  "}, "model_name must not be empty"),
+        ({"api_key": "  "}, "api_key must not be empty"),
+        ({"base_url": "  "}, "base_url must not be empty"),
+        ({"prompt": "  "}, "prompt must not be empty"),
+        (
+            {"prompt": "Only {statements}."},
+            r"prompt must contain \{statements\} and \{relevant_chunks\}",
+        ),
+        (
+            {"prompt": "Only {relevant_chunks}."},
+            r"prompt must contain \{statements\} and \{relevant_chunks\}",
+        ),
+        ({"prompt": "{statements"}, "prompt must be a valid format string"),
+        (
+            {"prompt": "{statements} {relevant_chunks} {unknown}"},
+            "prompt contains an unsupported placeholder: unknown",
+        ),
+        ({"temperature": -0.1}, "temperature must be greater than or equal to zero"),
+        ({"temperature": float("nan")}, "temperature must be finite"),
+        ({"temperature": float("inf")}, "temperature must be finite"),
+        ({"max_new_tokens": 0}, "max_new_tokens must be greater than zero"),
+    ],
+)
+def test_evaluate_information_preservation_api_rejects_invalid_values_before_client(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        preparation,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    call_arguments: dict[str, object] = {
+        "true_statement": "True.",
+        "false_statements": ["F1.", "F2.", "F3."],
+        "relevant_chunks": ["Chunk."],
+        "model_name": "model",
+        "api_key": "secret",
+        **arguments,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        preparation.evaluate_information_preservation_api(  # type: ignore[arg-type]
+            **call_arguments
+        )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "not JSON",
+        "[]",
+        "{}",
+        '{"selected_index": 1, "extra": 2}',
+        '{"selected_index": true}',
+        '{"selected_index": 1.5}',
+        '{"selected_index": 0}',
+        '{"selected_index": 5}',
+        None,
+    ],
+)
+def test_evaluate_information_preservation_api_rejects_invalid_response(
+    monkeypatch: pytest.MonkeyPatch,
+    response: object,
+) -> None:
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=response))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(
+        ValueError,
+        match=r"model response must be a JSON object containing only selected_index from 1 to 4",
+    ):
+        preparation.evaluate_information_preservation_api(
+            "True.",
+            ["F1.", "F2.", "F3."],
+            ["Chunk."],
+            model_name="model",
+            api_key="secret",
+        )
+
+
 def test_generate_questions_returns_exact_cleaned_json_questions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

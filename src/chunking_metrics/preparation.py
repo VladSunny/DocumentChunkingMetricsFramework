@@ -1,5 +1,6 @@
 import json
 import math
+import random
 import warnings
 from collections.abc import Sequence
 from functools import lru_cache
@@ -15,6 +16,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from .prompts import (
     DEFAULT_ANSWER_PROMPT,
     DEFAULT_ANSWER_SYSTEM_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
     DEFAULT_INFORMATION_PRESERVATION_PROMPT,
     DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
     DEFAULT_QUESTION_PROMPT,
@@ -340,6 +343,145 @@ def _parse_information_preservation_response(response: object) -> tuple[str, lis
     if len(set(false_statements)) != 3 or true_statement in false_statements:
         raise ValueError(error_message)
     return true_statement, false_statements
+
+
+def _validate_information_preservation_evaluation_arguments(
+    true_statement: str,
+    false_statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+    seed: int | None,
+) -> tuple[str, list[str], list[str]]:
+    if not isinstance(true_statement, str):
+        raise TypeError("true_statement must be a string")
+    if isinstance(false_statements, (str, bytes)) or not isinstance(false_statements, Sequence):
+        raise TypeError("false_statements must be a sequence of strings")
+    false_statement_items = list(false_statements)
+    for index, statement in enumerate(false_statement_items):
+        if not isinstance(statement, str):
+            raise TypeError(f"false_statements[{index}] must be a string")
+    if isinstance(relevant_chunks, (str, bytes)) or not isinstance(relevant_chunks, Sequence):
+        raise TypeError("relevant_chunks must be a sequence of strings")
+    relevant_chunk_items = list(relevant_chunks)
+    for index, chunk in enumerate(relevant_chunk_items):
+        if not isinstance(chunk, str):
+            raise TypeError(f"relevant_chunks[{index}] must be a string")
+    if not isinstance(model_name, str):
+        raise TypeError("model_name must be a string")
+    if not isinstance(api_key, str):
+        raise TypeError("api_key must be a string")
+    if base_url is not None and not isinstance(base_url, str):
+        raise TypeError("base_url must be a string or None")
+    if not isinstance(prompt, str):
+        raise TypeError("prompt must be a string")
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        raise TypeError("temperature must be a number")
+    if not isinstance(max_new_tokens, int) or isinstance(max_new_tokens, bool):
+        raise TypeError("max_new_tokens must be an integer")
+    if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
+        raise TypeError("seed must be an integer or None")
+
+    true_statement_item = true_statement.strip()
+    if not true_statement_item:
+        raise ValueError("true_statement must not be empty")
+    if len(false_statement_items) != 3:
+        raise ValueError("false_statements must contain exactly three statements")
+    for index, statement in enumerate(false_statement_items):
+        if not statement.strip():
+            raise ValueError(f"false_statements[{index}] must not be empty")
+    false_statement_items = [statement.strip() for statement in false_statement_items]
+    if len(set(false_statement_items)) != 3:
+        raise ValueError("false_statements must be distinct")
+    if true_statement_item in false_statement_items:
+        raise ValueError("false_statements must not contain true_statement")
+    if not relevant_chunk_items:
+        raise ValueError("relevant_chunks must not be empty")
+    for index, chunk in enumerate(relevant_chunk_items):
+        if not chunk.strip():
+            raise ValueError(f"relevant_chunks[{index}] must not be empty")
+    relevant_chunk_items = [chunk.strip() for chunk in relevant_chunk_items]
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if base_url is not None and not base_url.strip():
+        raise ValueError("base_url must not be empty")
+    if not prompt.strip():
+        raise ValueError("prompt must not be empty")
+    try:
+        prompt_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(prompt)
+            if field_name is not None
+        }
+    except ValueError as error:
+        raise ValueError("prompt must be a valid format string") from error
+    required_fields = {"statements", "relevant_chunks"}
+    if not required_fields.issubset(prompt_fields):
+        raise ValueError("prompt must contain {statements} and {relevant_chunks}")
+    unsupported_fields = prompt_fields - required_fields
+    if unsupported_fields:
+        unsupported_field = sorted(unsupported_fields)[0]
+        raise ValueError(f"prompt contains an unsupported placeholder: {unsupported_field}")
+    if not math.isfinite(temperature):
+        raise ValueError("temperature must be finite")
+    if temperature < 0:
+        raise ValueError("temperature must be greater than or equal to zero")
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be greater than zero")
+    return true_statement_item, false_statement_items, relevant_chunk_items
+
+
+def _information_preservation_evaluation_messages(
+    statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    prompt: str,
+) -> list[dict[str, str]]:
+    numbered_statements = [
+        {"index": index, "statement": statement}
+        for index, statement in enumerate(statements, start=1)
+    ]
+    try:
+        user_prompt = prompt.format(
+            statements=json.dumps(numbered_statements, ensure_ascii=False),
+            relevant_chunks=json.dumps(relevant_chunks, ensure_ascii=False),
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _parse_information_preservation_evaluation_response(response: object) -> int:
+    error_message = (
+        "model response must be a JSON object containing only selected_index from 1 to 4"
+    )
+    if not isinstance(response, str):
+        raise ValueError(error_message)
+    try:
+        selection = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if not isinstance(selection, dict) or set(selection) != {"selected_index"}:
+        raise ValueError(error_message)
+    selected_index = selection["selected_index"]
+    if (
+        not isinstance(selected_index, int)
+        or isinstance(selected_index, bool)
+        or not 1 <= selected_index <= 4
+    ):
+        raise ValueError(error_message)
+    return selected_index
 
 
 def _validate_question_arguments(
@@ -1125,6 +1267,90 @@ def generate_information_preservation_statements_api(
     )
     content = response.choices[0].message.content
     return _parse_information_preservation_response(content)
+
+
+def evaluate_information_preservation_api(
+    true_statement: str,
+    false_statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    model_name: str,
+    api_key: str,
+    base_url: str | None = None,
+    *,
+    prompt: str = DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT,
+    temperature: float = 0.0,
+    max_new_tokens: int = 32,
+    seed: int | None = None,
+) -> int:
+    """Run one HOPE Information Preservation multiple-choice evaluation.
+
+    Args:
+        true_statement: One non-empty statement known to be true.
+        false_statements: Exactly three distinct non-empty false statements. None may equal the
+            true statement.
+        relevant_chunks: Non-empty chunks retrieved as evidence for the true statement.
+        model_name: OpenAI-compatible chat model identifier.
+        api_key: API key passed to the OpenAI-compatible client.
+        base_url: Optional OpenAI-compatible API base URL.
+        prompt: User-message format string containing ``{statements}`` and
+            ``{relevant_chunks}``. Both values are inserted as JSON.
+        temperature: Non-negative generation temperature.
+        max_new_tokens: Maximum number of tokens available for the JSON response.
+        seed: Optional seed used only to shuffle the four statements reproducibly.
+
+    Returns:
+        ``1`` when the model selects the true statement, otherwise ``0``.
+
+    Raises:
+        TypeError: If an argument has an invalid type.
+        ValueError: If an argument or the model response violates the required contract.
+
+    The function performs exactly one API request without retries. Callers are responsible for
+    averaging the results of multiple independently generated tests.
+    """
+    true_statement_item, false_statement_items, relevant_chunk_items = (
+        _validate_information_preservation_evaluation_arguments(
+            true_statement,
+            false_statements,
+            relevant_chunks,
+            model_name,
+            api_key,
+            base_url,
+            prompt,
+            temperature,
+            max_new_tokens,
+            seed,
+        )
+    )
+    statements = [
+        (true_statement_item, True),
+        *((statement, False) for statement in false_statement_items),
+    ]
+    random.Random(seed).shuffle(statements)
+    true_statement_index = next(
+        index for index, (_, is_true) in enumerate(statements, start=1) if is_true
+    )
+    messages = _information_preservation_evaluation_messages(
+        [statement for statement, _ in statements],
+        relevant_chunk_items,
+        prompt,
+    )
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        stream=False,
+        extra_body={"thinking": {"type": "disabled"}},
+        response_format={"type": "json_object"},
+        max_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+    print(response.choices[0].message.content)
+    selected_index = _parse_information_preservation_evaluation_response(
+        response.choices[0].message.content
+    )
+    return int(selected_index == true_statement_index)
 
 
 def generate_questions_local(

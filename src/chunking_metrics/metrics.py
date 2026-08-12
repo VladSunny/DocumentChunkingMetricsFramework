@@ -251,3 +251,5 @@ def semantic_independence(
         return 0.0
 
     return float(np.mean(np.clip(similarities, 0.0, 1.0)))
+
+

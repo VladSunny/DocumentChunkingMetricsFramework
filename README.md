@@ -17,8 +17,7 @@ Five of the eleven metrics in the project plan are currently implemented:
 - [ ] [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
 - [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity) — `concept_unity`
 - [x] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
-- [ ] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
-- [ ] [HOPE Aggregate](docs/chunking_metrics.md#11-hope-aggregate) Do by yourself :)
+- [x] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
 
 A checked metric is implemented, exported from the package, and covered by tests. Functions that
 exist only as `NotImplementedError` placeholders are not considered implemented.
@@ -216,6 +215,53 @@ print(
 The first invocation of each preparation helper may download its default model. Pass `model_name`
 to a helper to use a different compatible Hugging Face model.
 
+### Single Information Preservation test
+
+`evaluate_information_preservation_api` runs one HOPE Information Preservation multiple-choice
+test through an OpenAI-compatible Chat Completions API. It accepts one true statement, exactly
+three distinct false statements, and one or more relevant chunks. The function shuffles the four
+options without modifying the input sequences and returns `1` if the model selects the true option
+or `0` otherwise.
+
+Pass the provider's `model_name`, `api_key`, and optional `base_url`. `temperature` defaults to
+`0.0`, `max_new_tokens` limits the JSON response, and `seed` makes only the option order
+reproducible. A custom `prompt` must contain both `{statements}` and `{relevant_chunks}`; the
+numbered options and chunks are substituted as JSON. The function makes one request without
+retries, so callers aggregate multiple independently generated tests themselves:
+
+```python
+from statistics import fmean
+
+from chunking_metrics.preparation import evaluate_information_preservation_api
+
+generated_tests = [
+    (
+        "The library opened a reading room in 2024.",
+        [
+            "The library closed its reading room in 2024.",
+            "The library opened a laboratory in 2024.",
+            "The library opened a reading room in 2020.",
+        ],
+        ["In 2024, the library opened a new reading room on the second floor."],
+    ),
+    # Add more independently generated tests and their retrieved chunks here.
+]
+
+scores = [
+    evaluate_information_preservation_api(
+        true_statement,
+        false_statements,
+        relevant_chunks,
+        model_name="provider/model",
+        api_key="your-api-key",
+        base_url="https://provider.example/v1",
+        seed=index,
+    )
+    for index, (true_statement, false_statements, relevant_chunks) in enumerate(generated_tests)
+]
+information_preservation = fmean(scores)
+```
+
 ## Public API
 
 Import metrics from `chunking_metrics.metrics`, input-preparation helpers from
@@ -242,6 +288,7 @@ root exports these three modules rather than their individual members.
 | `calculate_perplexity(text, model_name=..., context=None, device=None)` | Score target text with an optional preceding context excluded from the loss | Causal-language-model perplexity as `float` |
 | `generate_questions(chunk, model_name=..., prompt=..., question_count=5, temperature=0.7, max_new_tokens=256, device=None)` | Generate an exact number of questions answerable from one chunk | A list of `question_count` non-empty strings |
 | `generate_statements(chunk, model_name=..., prompt=..., statement_count=5, temperature=0.7, max_new_tokens=256, device=None)` | Extract an exact number of factual statements from one chunk | A list of `statement_count` non-empty strings |
+| `evaluate_information_preservation_api(true_statement, false_statements, relevant_chunks, model_name, api_key, base_url=None, ...)` | Run one OpenAI-compatible multiple-choice preservation test | `1` for the true option, otherwise `0` |
 
 ## Model and runtime notes
 
