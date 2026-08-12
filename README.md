@@ -8,14 +8,14 @@ reference chunks, annotated questions, or human relevance labels.
 
 Five of the eleven metrics in the project plan are currently implemented:
 
-- [x] [Size Compliance (SC)](docs/chunking_metrics.md#1-size-compliance-sc) — `size_compliance`
+- [x] [Size Compliance (SC)](docs/chunking_metrics.md#1-size-compliance-sc)
 - [ ] [Block Integrity (BI)](docs/chunking_metrics.md#2-block-integrity-bi)
-- [x] [Intrachunk Cohesion (ICC)](docs/chunking_metrics.md#3-intrachunk-cohesion-icc) — `intrachunk_cohesion`
-- [x] [Contextual Coherence (DCC)](docs/chunking_metrics.md#4-contextual-coherence-dcc) — `contextual_coherence`
+- [x] [Intrachunk Cohesion (ICC)](docs/chunking_metrics.md#3-intrachunk-cohesion-icc)
+- [x] [Contextual Coherence (DCC)](docs/chunking_metrics.md#4-contextual-coherence-dcc)
 - [ ] [Coreference Integrity (RC)](docs/chunking_metrics.md#5-coreference-integrity-rc)
-- [x] [Boundary Clarity (BC)](docs/chunking_metrics.md#6-boundary-clarity-bc) — `boundary_clarity`
+- [x] [Boundary Clarity (BC)](docs/chunking_metrics.md#6-boundary-clarity-bc)
 - [ ] [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
-- [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity) — `concept_unity`
+- [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity)
 - [x] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
 - [x] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
 
