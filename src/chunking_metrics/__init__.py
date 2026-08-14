@@ -1,3 +1,3 @@
-from . import metrics, preparation, prompts
+from . import metrics, preparations, prompts
 
-__all__ = ["metrics", "preparation", "prompts"]
+__all__ = ["metrics", "preparations", "prompts"]

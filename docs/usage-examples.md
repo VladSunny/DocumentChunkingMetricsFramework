@@ -2,7 +2,7 @@
 
 This guide covers every implemented public callable in `chunking_metrics` version `0.1.0`, from
 small standalone calls to complete document-level evaluation pipelines. Import functions from
-`chunking_metrics.metrics`, `chunking_metrics.preparation`, and prompt constants from
+`chunking_metrics.metrics`, `chunking_metrics.preparations`, and prompt constants from
 `chunking_metrics.prompts`.
 
 The examples deliberately separate calculation from input preparation. Local model examples may
@@ -116,18 +116,18 @@ print(score)
 
 ### Embeddings
 
-`calculate_embeddings` returns a one-dimensional vector for a string and a matrix for a sequence.
+`local.calculate_embeddings` returns a one-dimensional vector for a string and a matrix for a sequence.
 All returned vectors are L2-normalized.
 
 ```python
-from chunking_metrics.preparation import calculate_embeddings
+from chunking_metrics.preparations import local
 
-one_embedding = calculate_embeddings(
+one_embedding = local.calculate_embeddings(
     "Chunking splits a document into retrievable units.",
     model_name="cointegrated/rubert-tiny2",
     device="cpu",
 )
-many_embeddings = calculate_embeddings(
+many_embeddings = local.calculate_embeddings(
     ["First sentence.", "Second sentence."],
     model_name="cointegrated/rubert-tiny2",
     device="cpu",
@@ -141,14 +141,14 @@ print(one_embedding.shape, many_embeddings.shape)
 Only target tokens contribute to the loss when `context` is supplied.
 
 ```python
-from chunking_metrics.preparation import calculate_perplexity
+from chunking_metrics.preparations import local
 
-unconditional = calculate_perplexity(
+unconditional = local.calculate_perplexity(
     "The second chunk starts here.",
     model_name="ai-forever/rugpt3small_based_on_gpt2",
     device="cpu",
 )
-conditional = calculate_perplexity(
+conditional = local.calculate_perplexity(
     "The second chunk starts here.",
     model_name="ai-forever/rugpt3small_based_on_gpt2",
     context="The first chunk provides preceding context.",
@@ -163,7 +163,7 @@ Each query gets its own relevance-ranked list. If fewer than `top_k` candidates 
 returned.
 
 ```python
-from chunking_metrics.preparation import retrieve_relevant_chunks
+from chunking_metrics.preparations import local
 
 queries = ["How is chunk quality measured?", "Which model computes perplexity?"]
 candidates = [
@@ -171,7 +171,7 @@ candidates = [
     "A causal language model supplies perplexity values.",
     "Retrieval ranks chunks against a query embedding.",
 ]
-matches = retrieve_relevant_chunks(
+matches = local.retrieve_relevant_chunks(
     queries,
     candidates,
     model_name="cointegrated/rubert-tiny2",
@@ -190,9 +190,9 @@ and retry policy outside the library.
 ### Statements with a local model
 
 ```python
-from chunking_metrics.preparation import generate_statements_local
+from chunking_metrics.preparations import local
 
-statements = generate_statements_local(
+statements = local.generate_statements(
     "The archive opened in 2019. It digitized 4,000 maps in its first year.",
     model_name="Qwen/Qwen2.5-1.5B-Instruct",
     statement_count=3,
@@ -208,9 +208,9 @@ print(statements)
 ```python
 import os
 
-from chunking_metrics.preparation import generate_statements_api
+from chunking_metrics.preparations import api
 
-statements = generate_statements_api(
+statements = api.generate_statements(
     "The archive opened in 2019. It digitized 4,000 maps in its first year.",
     model_name="provider/model-name",
     api_key=os.environ["OPENAI_API_KEY"],
@@ -225,9 +225,9 @@ print(statements)
 ### Questions with a local model
 
 ```python
-from chunking_metrics.preparation import generate_questions_local
+from chunking_metrics.preparations import local
 
-questions = generate_questions_local(
+questions = local.generate_questions(
     "The archive opened in 2019. It digitized 4,000 maps in its first year.",
     model_name="Qwen/Qwen2.5-1.5B-Instruct",
     question_count=3,
@@ -243,9 +243,9 @@ print(questions)
 ```python
 import os
 
-from chunking_metrics.preparation import generate_questions_api
+from chunking_metrics.preparations import api
 
-questions = generate_questions_api(
+questions = api.generate_questions(
     "The archive opened in 2019. It digitized 4,000 maps in its first year.",
     model_name="provider/model-name",
     api_key=os.environ["OPENAI_API_KEY"],
@@ -263,10 +263,10 @@ The optional outer `additional_chunks_by_question` sequence must match the numbe
 questions.
 
 ```python
-from chunking_metrics.preparation import generate_answers_local
+from chunking_metrics.preparations import local
 
 questions = ["When did the archive open?", "How many maps did it digitize?"]
-answers = generate_answers_local(
+answers = local.generate_answers(
     questions,
     "The archive opened in 2019.",
     model_name="Qwen/Qwen2.5-1.5B-Instruct",
@@ -286,10 +286,10 @@ print(answers)
 ```python
 import os
 
-from chunking_metrics.preparation import generate_answers_api
+from chunking_metrics.preparations import api
 
 questions = ["When did the archive open?", "How many maps did it digitize?"]
-answers = generate_answers_api(
+answers = api.generate_answers(
     questions,
     "The archive opened in 2019.",
     model_name="provider/model-name",
@@ -316,9 +316,9 @@ supported by the retrieved chunks, and returns `1` for a correct choice or `0` o
 ```python
 import os
 
-from chunking_metrics.preparation import generate_information_preservation_statements_api
+from chunking_metrics.preparations import api
 
-true_statement, false_statements = generate_information_preservation_statements_api(
+true_statement, false_statements = api.generate_information_preservation_statements(
     "In 2024, the library opened a reading room on the second floor.",
     model_name="provider/model-name",
     api_key=os.environ["OPENAI_API_KEY"],
@@ -334,9 +334,9 @@ print(true_statement, false_statements)
 ```python
 import os
 
-from chunking_metrics.preparation import evaluate_information_preservation_api
+from chunking_metrics.preparations import api
 
-score = evaluate_information_preservation_api(
+score = api.evaluate_information_preservation(
     "The library opened a reading room in 2024.",
     [
         "The library closed its reading room in 2024.",
@@ -389,10 +389,10 @@ templates must contain every placeholder required by that workflow:
 For example:
 
 ```python
-from chunking_metrics.preparation import generate_statements_local
+from chunking_metrics.preparations import local
 
 custom_prompt = "Return exactly {statement_count} claims from {chunk} as a JSON array."
-statements = generate_statements_local(
+statements = local.generate_statements(
     "The observatory began operating in 1965.",
     prompt=custom_prompt,
     statement_count=2,
@@ -423,7 +423,7 @@ from chunking_metrics.metrics import (
     intrachunk_cohesion,
     size_compliance,
 )
-from chunking_metrics.preparation import calculate_embeddings, calculate_perplexity
+from chunking_metrics.preparations import local
 
 sentences_by_chunk = [
     ["The archive opened in 2019.", "It stores historical maps."],
@@ -435,11 +435,11 @@ chunks = [" ".join(sentences) for sentences in sentences_by_chunk]
 sc = size_compliance([len(chunk) for chunk in chunks], min_size=80, max_size=240)
 
 sentence_embeddings_by_chunk = [
-    calculate_embeddings(sentences, device="cpu") for sentences in sentences_by_chunk
+    local.calculate_embeddings(sentences, device="cpu") for sentences in sentences_by_chunk
 ]
 icc = intrachunk_cohesion(sentence_embeddings_by_chunk)
 
-chunk_embeddings = calculate_embeddings(chunks, device="cpu")
+chunk_embeddings = local.calculate_embeddings(chunks, device="cpu")
 dcc_by_chunk = []
 for index, chunk_embedding in enumerate(chunk_embeddings):
     neighbor_indices = [
@@ -448,10 +448,10 @@ for index, chunk_embedding in enumerate(chunk_embeddings):
     dcc_by_chunk.append(contextual_coherence(chunk_embedding, chunk_embeddings[neighbor_indices]))
 dcc = float(np.mean(dcc_by_chunk))
 
-unconditional = np.array([calculate_perplexity(chunk, device="cpu") for chunk in chunks])
+unconditional = np.array([local.calculate_perplexity(chunk, device="cpu") for chunk in chunks])
 conditional = np.array(
     [
-        calculate_perplexity(current, context=previous, device="cpu")
+        local.calculate_perplexity(current, context=previous, device="cpu")
         for previous, current in zip(chunks, chunks[1:])
     ]
 )
@@ -469,7 +469,7 @@ resulting chunk scores for a document-level value.
 from statistics import fmean
 
 from chunking_metrics.metrics import concept_unity
-from chunking_metrics.preparation import calculate_embeddings, generate_statements_local
+from chunking_metrics.preparations import local
 
 chunks = [
     "The archive opened in 2019. It stores historical maps.",
@@ -478,13 +478,13 @@ chunks = [
 
 chunk_scores = []
 for chunk in chunks:
-    statements = generate_statements_local(
+    statements = local.generate_statements(
         chunk,
         model_name="Qwen/Qwen2.5-1.5B-Instruct",
         statement_count=4,
         device="cpu",
     )
-    statement_embeddings = calculate_embeddings(statements, device="cpu")
+    statement_embeddings = local.calculate_embeddings(statements, device="cpu")
     chunk_scores.append(concept_unity(statement_embeddings))
 
 document_concept_unity = fmean(chunk_scores)
@@ -500,12 +500,7 @@ the evaluated chunk among retrieval candidates would invalidate the independence
 from statistics import fmean
 
 from chunking_metrics.metrics import semantic_independence
-from chunking_metrics.preparation import (
-    calculate_embeddings,
-    generate_answers_local,
-    generate_questions_local,
-    retrieve_relevant_chunks,
-)
+from chunking_metrics.preparations import local
 
 chunks = [
     "The archive opened in 2019. It stores historical maps.",
@@ -516,20 +511,20 @@ chunks = [
 chunk_scores = []
 for chunk_index, chunk in enumerate(chunks):
     other_chunks = [candidate for index, candidate in enumerate(chunks) if index != chunk_index]
-    questions = generate_questions_local(
+    questions = local.generate_questions(
         chunk,
         model_name="Qwen/Qwen2.5-1.5B-Instruct",
         question_count=4,
         device="cpu",
     )
-    retrieved = retrieve_relevant_chunks(questions, other_chunks, top_k=2, device="cpu")
-    standalone_answers = generate_answers_local(
+    retrieved = local.retrieve_relevant_chunks(questions, other_chunks, top_k=2, device="cpu")
+    standalone_answers = local.generate_answers(
         questions,
         chunk,
         model_name="Qwen/Qwen2.5-1.5B-Instruct",
         device="cpu",
     )
-    contextual_answers = generate_answers_local(
+    contextual_answers = local.generate_answers(
         questions,
         chunk,
         model_name="Qwen/Qwen2.5-1.5B-Instruct",
@@ -538,8 +533,8 @@ for chunk_index, chunk in enumerate(chunks):
     )
     chunk_scores.append(
         semantic_independence(
-            calculate_embeddings(standalone_answers, device="cpu"),
-            calculate_embeddings(contextual_answers, device="cpu"),
+            local.calculate_embeddings(standalone_answers, device="cpu"),
+            local.calculate_embeddings(contextual_answers, device="cpu"),
         )
     )
 
@@ -559,12 +554,7 @@ import os
 from statistics import fmean
 
 from chunking_metrics.metrics import semantic_independence
-from chunking_metrics.preparation import (
-    calculate_embeddings,
-    generate_answers_api,
-    generate_questions_api,
-    retrieve_relevant_chunks,
-)
+from chunking_metrics.preparations import api, local
 
 api_key = os.environ["OPENAI_API_KEY"]
 model_name = "provider/model-name"
@@ -578,22 +568,22 @@ chunks = [
 chunk_scores = []
 for chunk_index, chunk in enumerate(chunks):
     other_chunks = [candidate for index, candidate in enumerate(chunks) if index != chunk_index]
-    questions = generate_questions_api(
+    questions = api.generate_questions(
         chunk,
         model_name=model_name,
         api_key=api_key,
         base_url=base_url,
         question_count=4,
     )
-    retrieved = retrieve_relevant_chunks(questions, other_chunks, top_k=2, device="cpu")
-    standalone_answers = generate_answers_api(
+    retrieved = local.retrieve_relevant_chunks(questions, other_chunks, top_k=2, device="cpu")
+    standalone_answers = api.generate_answers(
         questions,
         chunk,
         model_name=model_name,
         api_key=api_key,
         base_url=base_url,
     )
-    contextual_answers = generate_answers_api(
+    contextual_answers = api.generate_answers(
         questions,
         chunk,
         model_name=model_name,
@@ -603,8 +593,8 @@ for chunk_index, chunk in enumerate(chunks):
     )
     chunk_scores.append(
         semantic_independence(
-            calculate_embeddings(standalone_answers, device="cpu"),
-            calculate_embeddings(contextual_answers, device="cpu"),
+            local.calculate_embeddings(standalone_answers, device="cpu"),
+            local.calculate_embeddings(contextual_answers, device="cpu"),
         )
     )
 
@@ -621,11 +611,7 @@ statement, evaluate the choice against those chunks, and average the binary resu
 import os
 from statistics import fmean
 
-from chunking_metrics.preparation import (
-    evaluate_information_preservation_api,
-    generate_information_preservation_statements_api,
-    retrieve_relevant_chunks,
-)
+from chunking_metrics.preparations import api, local
 
 api_key = os.environ["OPENAI_API_KEY"]
 model_name = "provider/model-name"
@@ -638,20 +624,20 @@ chunks = [
 
 test_scores = []
 for test_index, segment in enumerate(chunks):
-    true_statement, false_statements = generate_information_preservation_statements_api(
+    true_statement, false_statements = api.generate_information_preservation_statements(
         segment,
         model_name=model_name,
         api_key=api_key,
         base_url=base_url,
     )
-    relevant_chunks = retrieve_relevant_chunks(
+    relevant_chunks = local.retrieve_relevant_chunks(
         [true_statement],
         chunks,
         top_k=2,
         device="cpu",
     )[0]
     test_scores.append(
-        evaluate_information_preservation_api(
+        api.evaluate_information_preservation(
             true_statement,
             false_statements,
             relevant_chunks,

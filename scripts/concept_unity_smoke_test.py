@@ -2,24 +2,25 @@ import numpy as np
 from dotenv import load_dotenv
 
 from chunking_metrics.metrics import concept_unity
-from chunking_metrics.preparation import calculate_embeddings, generate_statements_local
+from chunking_metrics.preparations import local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "
     "Смысловая цельность помогает векторной модели точнее кодировать содержание фрагмента. "
     "Утверждения, извлечённые из цельного фрагмента, обычно описывают близкие понятия."
 )
-STATEMENT_COUNT = 5
+STATEMENT_COUNT = 3
 
 
 def main() -> None:
     load_dotenv()
-    statements = generate_statements_local(
+    statements = local.generate_statements(
         CHUNK,
         statement_count=STATEMENT_COUNT,
         # device="cpu",
     )
-    statement_embeddings = calculate_embeddings(statements, device="cpu")
+    print(statements)
+    statement_embeddings = local.calculate_embeddings(statements, device="cpu")
     score = concept_unity(statement_embeddings)
 
     assert len(statements) == STATEMENT_COUNT

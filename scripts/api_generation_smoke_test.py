@@ -4,12 +4,7 @@ import numpy as np
 from dotenv import load_dotenv
 
 from chunking_metrics.metrics import concept_unity, semantic_independence
-from chunking_metrics.preparation import (
-    calculate_embeddings,
-    generate_answers_api,
-    generate_questions_api,
-    generate_statements_api,
-)
+from chunking_metrics.preparations import api, local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "
@@ -28,24 +23,24 @@ def main() -> None:
     if not api_key:
         raise RuntimeError("API_KEY is required for the API smoke test")
 
-    statements = generate_statements_api(
+    statements = api.generate_statements(
         chunk=CHUNK,
         model_name=MODEL_NAME,
         api_key=api_key,
         base_url=BASE_URL,
         statement_count=ITEM_COUNT,
     )
-    statement_embeddings = calculate_embeddings(statements, device="cpu")
+    statement_embeddings = local.calculate_embeddings(statements, device="cpu")
     unity_score = concept_unity(statement_embeddings)
 
-    questions = generate_questions_api(
+    questions = api.generate_questions(
         chunk=CHUNK,
         model_name=MODEL_NAME,
         api_key=api_key,
         base_url=BASE_URL,
         question_count=ITEM_COUNT,
     )
-    standalone_answers = generate_answers_api(
+    standalone_answers = api.generate_answers(
         questions,
         CHUNK,
         model_name=MODEL_NAME,
@@ -53,7 +48,7 @@ def main() -> None:
         base_url=BASE_URL,
         max_new_tokens=1024,
     )
-    contextual_answers = generate_answers_api(
+    contextual_answers = api.generate_answers(
         questions,
         CHUNK,
         model_name=MODEL_NAME,
@@ -62,8 +57,8 @@ def main() -> None:
         additional_chunks_by_question=[[ADDITIONAL_CHUNK] for _ in questions],
         max_new_tokens=1024,
     )
-    standalone_embeddings = calculate_embeddings(standalone_answers, device="cpu")
-    contextual_embeddings = calculate_embeddings(contextual_answers, device="cpu")
+    standalone_embeddings = local.calculate_embeddings(standalone_answers, device="cpu")
+    contextual_embeddings = local.calculate_embeddings(contextual_answers, device="cpu")
     independence_score = semantic_independence(standalone_embeddings, contextual_embeddings)
 
     assert len(standalone_answers) == len(questions)

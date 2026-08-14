@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 import torch
 
-import chunking_metrics.preparation as preparation
 import chunking_metrics.prompts as prompts
-from chunking_metrics.preparation import calculate_perplexity
+from chunking_metrics.preparations import api, local
+from chunking_metrics.preparations.local import calculate_perplexity
 
 
 class FakeTokenizer:
@@ -191,7 +191,7 @@ def install_fake_components(
     tokenizer = FakeTokenizer(model_max_length=max_length)
     model = FakeModel(max_position_embeddings=max_length)
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, max_length),
     )
@@ -204,12 +204,12 @@ def test_generate_statements_returns_exact_cleaned_json_statements(
     tokenizer = FakeStatementTokenizer('[" Первое утверждение. ", "Второе утверждение."]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_statements_local(
+    result = local.generate_statements(
         "Текст чанка.",
         model_name="model",
         statement_count=2,
@@ -235,12 +235,12 @@ def test_generate_statements_formats_custom_prompt(
     tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_statements_local(
+    result = local.generate_statements(
         "Текст чанка.",
         model_name="model",
         prompt="Create {statement_count} claims from {chunk}.",
@@ -279,7 +279,7 @@ def test_generate_statements_rejects_invalid_argument_types_before_loading_model
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -294,7 +294,7 @@ def test_generate_statements_rejects_invalid_argument_types_before_loading_model
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.generate_statements_local(**arguments)  # type: ignore[arg-type]
+        local.generate_statements(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -331,7 +331,7 @@ def test_generate_statements_rejects_invalid_argument_values_before_loading_mode
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -346,7 +346,7 @@ def test_generate_statements_rejects_invalid_argument_values_before_loading_mode
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.generate_statements_local(**call_arguments)  # type: ignore[arg-type]
+        local.generate_statements(**call_arguments)  # type: ignore[arg-type]
 
 
 def test_generate_statements_rejects_chunk_that_cannot_fit_without_truncation(
@@ -355,13 +355,13 @@ def test_generate_statements_rejects_chunk_that_cannot_fit_without_truncation(
     tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 9),
     )
 
     with pytest.raises(ValueError, match="do not fit within the model context window"):
-        preparation.generate_statements_local(
+        local.generate_statements(
             "Текст чанка.",
             model_name="model",
             statement_count=2,
@@ -383,13 +383,13 @@ def test_generate_statements_requires_tokenizer_chat_template(
 
     tokenizer.apply_chat_template = reject_chat_template  # type: ignore[method-assign]
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match="tokenizer must define a chat template"):
-        preparation.generate_statements_local("Текст чанка.", model_name="model", device="cpu")
+        local.generate_statements("Текст чанка.", model_name="model", device="cpu")
 
 
 @pytest.mark.parametrize(
@@ -409,7 +409,7 @@ def test_generate_statements_rejects_response_outside_strict_json_contract(
     tokenizer = FakeStatementTokenizer(response)
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
@@ -418,7 +418,7 @@ def test_generate_statements_rejects_response_outside_strict_json_contract(
         ValueError,
         match="model response must be a JSON array of exactly 2 non-empty strings",
     ):
-        preparation.generate_statements_local(
+        local.generate_statements(
             "Текст чанка.",
             model_name="model",
             statement_count=2,
@@ -427,18 +427,18 @@ def test_generate_statements_rejects_response_outside_strict_json_contract(
         )
 
 
-def test_generate_statements_is_available_from_preparation_module(
+def test_generate_statements_is_available_from_local_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokenizer = FakeStatementTokenizer('["Первое.", "Второе."]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_statements_local(
+    result = local.generate_statements(
         "Текст чанка.",
         model_name="model",
         statement_count=2,
@@ -447,10 +447,10 @@ def test_generate_statements_is_available_from_preparation_module(
     )
 
     assert result == ["Первое.", "Второе."]
-    assert preparation.DEFAULT_STATEMENT_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
+    assert local.DEFAULT_STATEMENT_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
 
 
-def test_generate_information_preservation_statements_api_returns_labeled_statements(
+def test_generate_information_preservation_statements_returns_labeled_statements(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client_arguments: list[dict[str, object]] = []
@@ -477,8 +477,8 @@ def test_generate_information_preservation_statements_api_returns_labeled_statem
             client_arguments.append(kwargs)
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
-    generate = getattr(preparation, "generate_information_preservation_statements_api", None)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+    generate = getattr(api, "generate_information_preservation_statements", None)
 
     assert callable(generate)
     result = generate(
@@ -524,7 +524,7 @@ def test_generate_information_preservation_statements_api_returns_labeled_statem
         None,
     ],
 )
-def test_generate_information_preservation_statements_api_rejects_invalid_response(
+def test_generate_information_preservation_statements_rejects_invalid_response(
     monkeypatch: pytest.MonkeyPatch,
     response: object,
 ) -> None:
@@ -538,7 +538,7 @@ def test_generate_information_preservation_statements_api_rejects_invalid_respon
         def __init__(self, **kwargs: object) -> None:
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
 
     with pytest.raises(
         ValueError,
@@ -547,7 +547,7 @@ def test_generate_information_preservation_statements_api_rejects_invalid_respon
             "exactly three distinct non-empty false_statements"
         ),
     ):
-        preparation.generate_information_preservation_statements_api(
+        api.generate_information_preservation_statements(
             "Segment.", model_name="model", api_key="secret"
         )
 
@@ -581,7 +581,7 @@ def test_generate_information_preservation_statements_api_rejects_invalid_respon
         ("max_new_tokens", 0, ValueError, "max_new_tokens must be greater than zero"),
     ],
 )
-def test_generate_information_preservation_statements_api_rejects_invalid_arguments(
+def test_generate_information_preservation_statements_rejects_invalid_arguments(
     monkeypatch: pytest.MonkeyPatch,
     argument: str,
     value: object,
@@ -589,7 +589,7 @@ def test_generate_information_preservation_statements_api_rejects_invalid_argume
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        api,
         "OpenAI",
         lambda **kwargs: pytest.fail("client must not be created"),
     )
@@ -602,12 +602,12 @@ def test_generate_information_preservation_statements_api_rejects_invalid_argume
     }
 
     with pytest.raises(error_type, match=message):
-        preparation.generate_information_preservation_statements_api(  # type: ignore[arg-type]
+        api.generate_information_preservation_statements(  # type: ignore[arg-type]
             **arguments
         )
 
 
-def test_evaluate_information_preservation_api_returns_one_and_sends_exact_request(
+def test_evaluate_information_preservation_returns_one_and_sends_exact_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client_arguments: list[dict[str, object]] = []
@@ -628,9 +628,9 @@ def test_evaluate_information_preservation_api_returns_one_and_sends_exact_reque
     true_statement = "True."
     false_statements = ["False 1.", "False 2.", "False 3."]
     relevant_chunks = ["Chunk one.", "Chunk two."]
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
 
-    result = preparation.evaluate_information_preservation_api(
+    result = api.evaluate_information_preservation(
         true_statement,
         false_statements,
         relevant_chunks,
@@ -675,7 +675,7 @@ def test_evaluate_information_preservation_api_returns_one_and_sends_exact_reque
     ]
 
 
-def test_evaluate_information_preservation_api_returns_zero_for_false_selection(
+def test_evaluate_information_preservation_returns_zero_for_false_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeCompletions:
@@ -688,9 +688,9 @@ def test_evaluate_information_preservation_api_returns_zero_for_false_selection(
         def __init__(self, **kwargs: object) -> None:
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
 
-    result = preparation.evaluate_information_preservation_api(
+    result = api.evaluate_information_preservation(
         "True.",
         ["False 1.", "False 2.", "False 3."],
         ["Relevant chunk."],
@@ -702,7 +702,7 @@ def test_evaluate_information_preservation_api_returns_zero_for_false_selection(
     assert result == 0
 
 
-def test_evaluate_information_preservation_api_repeats_order_for_same_seed(
+def test_evaluate_information_preservation_repeats_order_for_same_seed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_messages: list[str] = []
@@ -718,7 +718,7 @@ def test_evaluate_information_preservation_api_repeats_order_for_same_seed(
         def __init__(self, **kwargs: object) -> None:
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
     arguments = {
         "true_statement": "True.",
         "false_statements": ["False 1.", "False 2.", "False 3."],
@@ -728,8 +728,8 @@ def test_evaluate_information_preservation_api_repeats_order_for_same_seed(
         "seed": 7,
     }
 
-    preparation.evaluate_information_preservation_api(**arguments)
-    preparation.evaluate_information_preservation_api(**arguments)
+    api.evaluate_information_preservation(**arguments)
+    api.evaluate_information_preservation(**arguments)
 
     assert user_messages[0] == user_messages[1]
 
@@ -752,14 +752,14 @@ def test_evaluate_information_preservation_api_repeats_order_for_same_seed(
         ("seed", 1.5, "seed must be an integer or None"),
     ],
 )
-def test_evaluate_information_preservation_api_rejects_invalid_types_before_client(
+def test_evaluate_information_preservation_rejects_invalid_types_before_client(
     monkeypatch: pytest.MonkeyPatch,
     argument: str,
     value: object,
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        api,
         "OpenAI",
         lambda **kwargs: pytest.fail("client must not be created"),
     )
@@ -773,7 +773,7 @@ def test_evaluate_information_preservation_api_rejects_invalid_types_before_clie
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.evaluate_information_preservation_api(**arguments)  # type: ignore[arg-type]
+        api.evaluate_information_preservation(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -826,13 +826,13 @@ def test_evaluate_information_preservation_api_rejects_invalid_types_before_clie
         ({"max_new_tokens": 0}, "max_new_tokens must be greater than zero"),
     ],
 )
-def test_evaluate_information_preservation_api_rejects_invalid_values_before_client(
+def test_evaluate_information_preservation_rejects_invalid_values_before_client(
     monkeypatch: pytest.MonkeyPatch,
     arguments: dict[str, object],
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        api,
         "OpenAI",
         lambda **kwargs: pytest.fail("client must not be created"),
     )
@@ -846,7 +846,7 @@ def test_evaluate_information_preservation_api_rejects_invalid_values_before_cli
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.evaluate_information_preservation_api(  # type: ignore[arg-type]
+        api.evaluate_information_preservation(  # type: ignore[arg-type]
             **call_arguments
         )
 
@@ -865,7 +865,7 @@ def test_evaluate_information_preservation_api_rejects_invalid_values_before_cli
         None,
     ],
 )
-def test_evaluate_information_preservation_api_rejects_invalid_response(
+def test_evaluate_information_preservation_rejects_invalid_response(
     monkeypatch: pytest.MonkeyPatch,
     response: object,
 ) -> None:
@@ -879,13 +879,13 @@ def test_evaluate_information_preservation_api_rejects_invalid_response(
         def __init__(self, **kwargs: object) -> None:
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
 
     with pytest.raises(
         ValueError,
         match=r"model response must be a JSON object containing only selected_index from 1 to 4",
     ):
-        preparation.evaluate_information_preservation_api(
+        api.evaluate_information_preservation(
             "True.",
             ["F1.", "F2.", "F3."],
             ["Chunk."],
@@ -901,13 +901,13 @@ def test_generate_questions_returns_exact_cleaned_json_questions(
     model = FakeStatementModel()
 
     def load_model(model_name: str, device: str) -> tuple[Any, Any, int]:
-        assert model_name == preparation.DEFAULT_STATEMENT_MODEL
+        assert model_name == local.DEFAULT_STATEMENT_MODEL
         assert device == "cpu"
         return tokenizer, model, 32
 
-    monkeypatch.setattr(preparation, "_load_model_and_tokenizer", load_model)
+    monkeypatch.setattr(local, "_load_model_and_tokenizer", load_model)
 
-    result = preparation.generate_questions_local(
+    result = local.generate_questions(
         "Текст чанка.",
         question_count=2,
         temperature=0.5,
@@ -930,12 +930,12 @@ def test_generate_questions_formats_custom_prompt(monkeypatch: pytest.MonkeyPatc
     tokenizer = FakeStatementTokenizer('["Первый?", "Второй?"]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_questions_local(
+    result = local.generate_questions(
         "Текст чанка.",
         model_name="model",
         prompt="Create {question_count} questions from {chunk}.",
@@ -974,7 +974,7 @@ def test_generate_questions_rejects_invalid_argument_types_before_loading_model(
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -989,7 +989,7 @@ def test_generate_questions_rejects_invalid_argument_types_before_loading_model(
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.generate_questions_local(**arguments)  # type: ignore[arg-type]
+        local.generate_questions(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -1026,7 +1026,7 @@ def test_generate_questions_rejects_invalid_argument_values_before_loading_model
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -1041,7 +1041,7 @@ def test_generate_questions_rejects_invalid_argument_values_before_loading_model
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.generate_questions_local(**call_arguments)  # type: ignore[arg-type]
+        local.generate_questions(**call_arguments)  # type: ignore[arg-type]
 
 
 def test_generate_questions_rejects_chunk_that_cannot_fit_without_truncation(
@@ -1050,13 +1050,13 @@ def test_generate_questions_rejects_chunk_that_cannot_fit_without_truncation(
     tokenizer = FakeStatementTokenizer('["Первый?", "Второй?"]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 9),
     )
 
     with pytest.raises(ValueError, match="do not fit within the model context window"):
-        preparation.generate_questions_local(
+        local.generate_questions(
             "Текст чанка.",
             model_name="model",
             question_count=2,
@@ -1078,13 +1078,13 @@ def test_generate_questions_requires_tokenizer_chat_template(
 
     tokenizer.apply_chat_template = reject_chat_template  # type: ignore[method-assign]
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match="tokenizer must define a chat template"):
-        preparation.generate_questions_local("Текст чанка.", model_name="model", device="cpu")
+        local.generate_questions("Текст чанка.", model_name="model", device="cpu")
 
 
 @pytest.mark.parametrize(
@@ -1104,7 +1104,7 @@ def test_generate_questions_rejects_response_outside_strict_json_contract(
     tokenizer = FakeStatementTokenizer(response)
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
@@ -1113,7 +1113,7 @@ def test_generate_questions_rejects_response_outside_strict_json_contract(
         ValueError,
         match="model response must be a JSON array of exactly 2 non-empty strings",
     ):
-        preparation.generate_questions_local(
+        local.generate_questions(
             "Текст чанка.",
             model_name="model",
             question_count=2,
@@ -1122,18 +1122,18 @@ def test_generate_questions_rejects_response_outside_strict_json_contract(
         )
 
 
-def test_generate_questions_is_available_from_preparation_module(
+def test_generate_questions_is_available_from_local_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokenizer = FakeStatementTokenizer('["Первый?", "Второй?"]')
     model = FakeStatementModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_questions_local(
+    result = local.generate_questions(
         "Текст чанка.",
         model_name="model",
         question_count=2,
@@ -1144,7 +1144,7 @@ def test_generate_questions_is_available_from_preparation_module(
     assert result == ["Первый?", "Второй?"]
 
 
-def test_generate_answers_local_returns_answers_in_order_with_per_question_context(
+def test_generate_answers_returns_answers_in_order_with_per_question_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokenizer = FakeAnswerTokenizer([" Первый ответ. ", "Второй ответ."])
@@ -1155,9 +1155,9 @@ def test_generate_answers_local_returns_answers_in_order_with_per_question_conte
         loads.append((model_name, device))
         return tokenizer, model, 32
 
-    monkeypatch.setattr(preparation, "_load_model_and_tokenizer", load_model)
+    monkeypatch.setattr(local, "_load_model_and_tokenizer", load_model)
 
-    result = preparation.generate_answers_local(
+    result = local.generate_answers(
         ["Первый вопрос?", "Второй вопрос?"],
         "Основной чанк.",
         model_name="model",
@@ -1188,7 +1188,7 @@ def test_generate_answers_local_returns_answers_in_order_with_per_question_conte
         (0.4, {"do_sample": True, "temperature": 0.4}),
     ],
 )
-def test_generate_answers_local_selects_greedy_or_sampling_decoding(
+def test_generate_answers_selects_greedy_or_sampling_decoding(
     monkeypatch: pytest.MonkeyPatch,
     temperature: float,
     expected_generation_arguments: dict[str, object],
@@ -1196,12 +1196,12 @@ def test_generate_answers_local_selects_greedy_or_sampling_decoding(
     tokenizer = FakeAnswerTokenizer(["Ответ."])
     model = FakeAnswerModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
-    result = preparation.generate_answers_local(
+    result = local.generate_answers(
         ["Вопрос?"],
         "Чанк.",
         model_name="model",
@@ -1219,7 +1219,7 @@ def test_generate_answers_local_selects_greedy_or_sampling_decoding(
     assert "<additional_sources>\n[]\n</additional_sources>" in tokenizer.messages[0][-1]["content"]
 
 
-def test_generate_answers_api_creates_one_client_and_calls_once_per_question(
+def test_generate_answers_creates_one_client_and_calls_once_per_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client_arguments: list[dict[str, object]] = []
@@ -1238,9 +1238,9 @@ def test_generate_answers_api_creates_one_client_and_calls_once_per_question(
             client_arguments.append(kwargs)
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
 
-    result = preparation.generate_answers_api(
+    result = api.generate_answers(
         ["Первый?", "Второй?"],
         "Чанк.",
         model_name="provider/model",
@@ -1292,14 +1292,14 @@ def test_generate_answers_api_creates_one_client_and_calls_once_per_question(
         ),
     ],
 )
-def test_generate_answers_local_rejects_invalid_argument_types_before_loading_model(
+def test_generate_answers_rejects_invalid_argument_types_before_loading_model(
     monkeypatch: pytest.MonkeyPatch,
     argument: str,
     value: object,
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -1313,7 +1313,7 @@ def test_generate_answers_local_rejects_invalid_argument_types_before_loading_mo
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.generate_answers_local(**arguments)  # type: ignore[arg-type]
+        local.generate_answers(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -1342,13 +1342,13 @@ def test_generate_answers_local_rejects_invalid_argument_types_before_loading_mo
         ({"max_new_tokens": 0}, "max_new_tokens must be greater than zero"),
     ],
 )
-def test_generate_answers_local_rejects_invalid_argument_values_before_loading_model(
+def test_generate_answers_rejects_invalid_argument_values_before_loading_model(
     monkeypatch: pytest.MonkeyPatch,
     arguments: dict[str, object],
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -1363,22 +1363,22 @@ def test_generate_answers_local_rejects_invalid_argument_values_before_loading_m
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.generate_answers_local(**call_arguments)  # type: ignore[arg-type]
+        local.generate_answers(**call_arguments)  # type: ignore[arg-type]
 
 
-def test_generate_answers_local_reports_question_index_on_context_overflow(
+def test_generate_answers_reports_question_index_on_context_overflow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokenizer = FakeAnswerTokenizer(["Первый."], prompt_lengths=[2, 7])
     model = FakeAnswerModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 10),
     )
 
     with pytest.raises(ValueError, match=r"question 1.*model context window"):
-        preparation.generate_answers_local(
+        local.generate_answers(
             ["Первый?", "Второй?"],
             "Чанк.",
             model_name="model",
@@ -1389,7 +1389,7 @@ def test_generate_answers_local_reports_question_index_on_context_overflow(
     assert len(model.generation_arguments) == 1
 
 
-def test_generate_answers_local_requires_tokenizer_chat_template(
+def test_generate_answers_requires_tokenizer_chat_template(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokenizer = FakeAnswerTokenizer(["Ответ."])
@@ -1400,37 +1400,37 @@ def test_generate_answers_local_requires_tokenizer_chat_template(
 
     tokenizer.apply_chat_template = reject_chat_template  # type: ignore[method-assign]
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match=r"question 0.*tokenizer must define a chat template"):
-        preparation.generate_answers_local(
+        local.generate_answers(
             ["Вопрос?"], "Чанк.", model_name="model", max_new_tokens=4, device="cpu"
         )
 
 
 @pytest.mark.parametrize("response", ["", "  "])
-def test_generate_answers_local_rejects_empty_answer(
+def test_generate_answers_rejects_empty_answer(
     monkeypatch: pytest.MonkeyPatch,
     response: str,
 ) -> None:
     tokenizer = FakeAnswerTokenizer([response])
     model = FakeAnswerModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_model_and_tokenizer",
         lambda model_name, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match=r"answer for question 0 must not be empty"):
-        preparation.generate_answers_local(
+        local.generate_answers(
             ["Вопрос?"], "Чанк.", model_name="model", max_new_tokens=4, device="cpu"
         )
 
 
-def test_generate_answers_api_rejects_empty_message_content(
+def test_generate_answers_rejects_empty_message_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeCompletions:
@@ -1441,10 +1441,10 @@ def test_generate_answers_api_rejects_empty_message_content(
         def __init__(self, **kwargs: object) -> None:
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    monkeypatch.setattr(preparation, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
 
     with pytest.raises(ValueError, match=r"answer for question 0 must not be empty"):
-        preparation.generate_answers_api(["Вопрос?"], "Чанк.", model_name="model", api_key="key")
+        api.generate_answers(["Вопрос?"], "Чанк.", model_name="model", api_key="key")
 
 
 @pytest.mark.parametrize(
@@ -1456,7 +1456,7 @@ def test_generate_answers_api_rejects_empty_message_content(
         ("base_url", "  ", ValueError, "base_url must not be empty"),
     ],
 )
-def test_generate_answers_api_rejects_invalid_client_arguments_before_creating_client(
+def test_generate_answers_rejects_invalid_client_arguments_before_creating_client(
     monkeypatch: pytest.MonkeyPatch,
     argument: str,
     value: object,
@@ -1464,7 +1464,7 @@ def test_generate_answers_api_rejects_invalid_client_arguments_before_creating_c
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        api,
         "OpenAI",
         lambda **kwargs: pytest.fail("client must not be created"),
     )
@@ -1478,7 +1478,7 @@ def test_generate_answers_api_rejects_invalid_client_arguments_before_creating_c
     }
 
     with pytest.raises(error_type, match=message):
-        preparation.generate_answers_api(**arguments)  # type: ignore[arg-type]
+        api.generate_answers(**arguments)  # type: ignore[arg-type]
 
 
 def test_calculate_embeddings_returns_vector_for_single_text(
@@ -1486,13 +1486,13 @@ def test_calculate_embeddings_returns_vector_for_single_text(
 ) -> None:
     model = FakeEmbeddingModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: model,
         raising=False,
     )
 
-    result = preparation.calculate_embeddings(
+    result = local.calculate_embeddings(
         "text",
         model_name="model",
         device="cpu",
@@ -1507,13 +1507,13 @@ def test_calculate_embeddings_returns_float32_matrix_for_text_sequence(
 ) -> None:
     model = FakeEmbeddingModel(embedding_dtype=np.dtype(np.float64))
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: model,
         raising=False,
     )
 
-    result = preparation.calculate_embeddings(
+    result = local.calculate_embeddings(
         ("first", "second"),
         model_name="model",
         device="cpu",
@@ -1534,29 +1534,29 @@ def test_embedding_model_loader_caches_model_and_enables_eval(
         loads.append((model_name, device))
         return model
 
-    monkeypatch.setattr(preparation, "SentenceTransformer", load_model, raising=False)
-    preparation._load_embedding_model.cache_clear()
+    monkeypatch.setattr(local, "SentenceTransformer", load_model, raising=False)
+    local._load_embedding_model.cache_clear()
 
-    first = preparation._load_embedding_model("model", "cpu")
-    second = preparation._load_embedding_model("model", "cpu")
+    first = local._load_embedding_model("model", "cpu")
+    second = local._load_embedding_model("model", "cpu")
 
     assert first is second
     assert loads == [("model", "cpu")]
     assert model.is_eval
-    preparation._load_embedding_model.cache_clear()
+    local._load_embedding_model.cache_clear()
 
 
 def test_calculate_embeddings_rejects_empty_text_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
 
     with pytest.raises(ValueError, match="texts must not be empty"):
-        preparation.calculate_embeddings([], device="cpu")
+        local.calculate_embeddings([], device="cpu")
 
 
 @pytest.mark.parametrize(
@@ -1577,7 +1577,7 @@ def test_calculate_embeddings_rejects_invalid_argument_types(
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
@@ -1590,7 +1590,7 @@ def test_calculate_embeddings_rejects_invalid_argument_types(
     }
 
     with pytest.raises(TypeError, match=message):
-        preparation.calculate_embeddings(**arguments)  # type: ignore[arg-type]
+        local.calculate_embeddings(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -1609,13 +1609,13 @@ def test_calculate_embeddings_rejects_invalid_argument_values(
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: pytest.fail("model must not be loaded"),
     )
 
     with pytest.raises(ValueError, match=message):
-        preparation.calculate_embeddings(**arguments, device="cpu")  # type: ignore[arg-type]
+        local.calculate_embeddings(**arguments, device="cpu")  # type: ignore[arg-type]
 
 
 def test_calculate_embeddings_warns_when_texts_are_truncated(
@@ -1623,7 +1623,7 @@ def test_calculate_embeddings_warns_when_texts_are_truncated(
 ) -> None:
     model = FakeEmbeddingModel(max_seq_length=5)
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: model,
     )
@@ -1632,7 +1632,7 @@ def test_calculate_embeddings_warns_when_texts_are_truncated(
         UserWarning,
         match="2 texts exceed the model limit of 5 tokens and will be truncated",
     ):
-        result = preparation.calculate_embeddings(
+        result = local.calculate_embeddings(
             ["abcd", "x", "abcdef"],
             model_name="model",
             device="cpu",
@@ -1642,17 +1642,17 @@ def test_calculate_embeddings_warns_when_texts_are_truncated(
     assert result.shape == (3, 2)
 
 
-def test_calculate_embeddings_is_available_from_preparation_module(
+def test_calculate_embeddings_is_available_from_local_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = FakeEmbeddingModel()
     monkeypatch.setattr(
-        preparation,
+        local,
         "_load_embedding_model",
         lambda model_name, device: model,
     )
 
-    result = preparation.calculate_embeddings(
+    result = local.calculate_embeddings(
         "text",
         model_name="model",
         device="cpu",
@@ -1687,9 +1687,9 @@ def test_retrieve_relevant_chunks_ranks_candidates_for_each_query(
             dtype=np.float32,
         )
 
-    monkeypatch.setattr(preparation, "calculate_embeddings", calculate_embeddings)
+    monkeypatch.setattr(local, "calculate_embeddings", calculate_embeddings)
 
-    result = preparation.retrieve_relevant_chunks(
+    result = local.retrieve_relevant_chunks(
         ["query-a", "query-b"],
         ["chunk-a", "chunk-b", "chunk-c", "chunk-d"],
         model_name="model",
@@ -1715,7 +1715,7 @@ def test_retrieve_relevant_chunks_returns_all_candidates_and_preserves_tie_order
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "calculate_embeddings",
         lambda *args, **kwargs: np.array(
             [
@@ -1727,7 +1727,7 @@ def test_retrieve_relevant_chunks_returns_all_candidates_and_preserves_tie_order
         ),
     )
 
-    result = preparation.retrieve_relevant_chunks(
+    result = local.retrieve_relevant_chunks(
         ["query"],
         ["first", "second"],
         top_k=3,
@@ -1765,7 +1765,7 @@ def test_retrieve_relevant_chunks_rejects_invalid_argument_types_before_embeddin
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "calculate_embeddings",
         lambda *args, **kwargs: pytest.fail("embeddings must not be calculated"),
     )
@@ -1776,7 +1776,7 @@ def test_retrieve_relevant_chunks_rejects_invalid_argument_types_before_embeddin
     }
 
     with pytest.raises(error_type, match=message):
-        preparation.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
+        local.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -1801,7 +1801,7 @@ def test_retrieve_relevant_chunks_rejects_invalid_values_before_embedding(
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        preparation,
+        local,
         "calculate_embeddings",
         lambda *args, **kwargs: pytest.fail("embeddings must not be calculated"),
     )
@@ -1812,7 +1812,7 @@ def test_retrieve_relevant_chunks_rejects_invalid_values_before_embedding(
     }
 
     with pytest.raises(ValueError, match=message):
-        preparation.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
+        local.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
 
 
 def test_calculate_perplexity_rejects_empty_text() -> None:
@@ -1883,21 +1883,21 @@ def test_calculate_perplexity_rejects_empty_model_name() -> None:
 def test_resolve_device_prefers_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
-    assert preparation._resolve_device(None) == "cuda"
+    assert local._resolve_device(None) == "cuda"
 
 
 def test_resolve_device_uses_mps_before_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
 
-    assert preparation._resolve_device(None) == "mps"
+    assert local._resolve_device(None) == "mps"
 
 
 def test_resolve_device_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
 
-    assert preparation._resolve_device(None) == "cpu"
+    assert local._resolve_device(None) == "cpu"
 
 
 def test_model_loader_caches_last_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1916,12 +1916,12 @@ def test_model_loader_caches_last_model(monkeypatch: pytest.MonkeyPatch) -> None
         model_loads += 1
         return model
 
-    monkeypatch.setattr(preparation.AutoTokenizer, "from_pretrained", load_tokenizer)
-    monkeypatch.setattr(preparation.AutoModelForCausalLM, "from_pretrained", load_model)
-    preparation._load_model_and_tokenizer.cache_clear()
+    monkeypatch.setattr(local.AutoTokenizer, "from_pretrained", load_tokenizer)
+    monkeypatch.setattr(local.AutoModelForCausalLM, "from_pretrained", load_model)
+    local._load_model_and_tokenizer.cache_clear()
 
-    first = preparation._load_model_and_tokenizer("model", "cpu")
-    second = preparation._load_model_and_tokenizer("model", "cpu")
+    first = local._load_model_and_tokenizer("model", "cpu")
+    second = local._load_model_and_tokenizer("model", "cpu")
 
     assert first is second
     assert first[2] == 32
@@ -1929,4 +1929,4 @@ def test_model_loader_caches_last_model(monkeypatch: pytest.MonkeyPatch) -> None
     assert model_loads == 1
     assert model.loaded_device == "cpu"
     assert model.is_eval
-    preparation._load_model_and_tokenizer.cache_clear()
+    local._load_model_and_tokenizer.cache_clear()

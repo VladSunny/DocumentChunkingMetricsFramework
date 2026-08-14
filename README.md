@@ -80,13 +80,13 @@ sentence-embedding matrix per chunk:
 
 ```python
 from chunking_metrics.metrics import intrachunk_cohesion
-from chunking_metrics.preparation import calculate_embeddings
+from chunking_metrics.preparations import local
 
 sentences_by_chunk = [
     ["Chunking splits a document.", "Chunk size affects retrieval."],
     ["Cohesion measures relatedness.", "Related sentences belong together."],
 ]
-embeddings_by_chunk = [calculate_embeddings(sentences) for sentences in sentences_by_chunk]
+embeddings_by_chunk = [local.calculate_embeddings(sentences) for sentences in sentences_by_chunk]
 score = intrachunk_cohesion(embeddings_by_chunk)
 print(score)
 ```
@@ -101,7 +101,7 @@ Import through the three public modules shown below. The package root exports th
 their individual members.
 
 ```python
-from chunking_metrics import metrics, preparation, prompts
+from chunking_metrics import metrics, preparations, prompts
 ```
 
 ### Metrics (`chunking_metrics.metrics`)
@@ -118,21 +118,21 @@ from chunking_metrics import metrics, preparation, prompts
 The module also exposes the unimplemented placeholders `block_integrity`,
 `coreference_integrity`, and `chunk_score`. Calling them raises `NotImplementedError`.
 
-### Input preparation (`chunking_metrics.preparation`)
+### Input preparation (`chunking_metrics.preparations`)
 
 | Function | Purpose |
 | --- | --- |
-| `calculate_embeddings` | Encode one text or a sequence as normalized embeddings |
-| `calculate_perplexity` | Calculate target perplexity, optionally conditioned on preceding text |
-| `retrieve_relevant_chunks` | Rank candidate chunks independently for each query |
-| `generate_statements_local` | Generate statements with a local causal chat model |
-| `generate_statements_api` | Generate statements through an OpenAI-compatible API |
-| `generate_questions_local` | Generate questions with a local causal chat model |
-| `generate_questions_api` | Generate questions through an OpenAI-compatible API |
-| `generate_answers_local` | Answer questions with a local causal chat model |
-| `generate_answers_api` | Answer questions through an OpenAI-compatible API |
-| `generate_information_preservation_statements_api` | Generate one true and three false statements |
-| `evaluate_information_preservation_api` | Score one retrieved multiple-choice test as `0` or `1` |
+| `local.calculate_embeddings` | Encode one text or a sequence as normalized embeddings |
+| `local.calculate_perplexity` | Calculate target perplexity, optionally conditioned on preceding text |
+| `local.retrieve_relevant_chunks` | Rank candidate chunks independently for each query |
+| `local.generate_statements` | Generate statements with a local causal chat model |
+| `api.generate_statements` | Generate statements through an OpenAI-compatible API |
+| `local.generate_questions` | Generate questions with a local causal chat model |
+| `api.generate_questions` | Generate questions through an OpenAI-compatible API |
+| `local.generate_answers` | Answer questions with a local causal chat model |
+| `api.generate_answers` | Answer questions through an OpenAI-compatible API |
+| `api.generate_information_preservation_statements` | Generate one true and three false statements |
+| `api.evaluate_information_preservation` | Score one retrieved multiple-choice test as `0` or `1` |
 
 ### Prompts (`chunking_metrics.prompts`)
 

@@ -4,7 +4,7 @@ import os
 
 from dotenv import load_dotenv
 
-from chunking_metrics.preparation import generate_information_preservation_statements_api
+from chunking_metrics.preparations import api
 
 SEGMENT = (
     "В 2024 году библиотека открыла новый читальный зал на втором этаже. "
@@ -21,7 +21,7 @@ def main() -> None:
     if not api_key:
         raise RuntimeError("API_KEY is required for the API smoke test")
 
-    true_statement, false_statements = generate_information_preservation_statements_api(
+    true_statement, false_statements = api.generate_information_preservation_statements(
         SEGMENT,
         model_name=MODEL_NAME,
         api_key=api_key,

@@ -1,11 +1,7 @@
 import numpy as np
 
 from chunking_metrics.metrics import semantic_independence
-from chunking_metrics.preparation import (
-    calculate_embeddings,
-    generate_answers_local,
-    retrieve_relevant_chunks,
-)
+from chunking_metrics.preparations import local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "
@@ -24,15 +20,15 @@ CANDIDATE_CHUNKS = [
 
 
 def main() -> None:
-    additional_chunks_by_question = retrieve_relevant_chunks(QUESTIONS, CANDIDATE_CHUNKS)
-    standalone_answers = generate_answers_local(QUESTIONS, CHUNK)
-    contextual_answers = generate_answers_local(
+    additional_chunks_by_question = local.retrieve_relevant_chunks(QUESTIONS, CANDIDATE_CHUNKS)
+    standalone_answers = local.generate_answers(QUESTIONS, CHUNK)
+    contextual_answers = local.generate_answers(
         QUESTIONS,
         CHUNK,
         additional_chunks_by_question=additional_chunks_by_question,
     )
-    standalone_embeddings = calculate_embeddings(standalone_answers, device="cpu")
-    contextual_embeddings = calculate_embeddings(contextual_answers, device="cpu")
+    standalone_embeddings = local.calculate_embeddings(standalone_answers, device="cpu")
+    contextual_embeddings = local.calculate_embeddings(contextual_answers, device="cpu")
     score = semantic_independence(standalone_embeddings, contextual_embeddings)
 
     assert len(standalone_answers) == len(QUESTIONS)

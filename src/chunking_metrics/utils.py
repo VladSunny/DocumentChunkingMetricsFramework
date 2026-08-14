@@ -1,8 +1,227 @@
+import json
 import math
 from collections.abc import Sequence
 from string import Formatter
 
 import numpy as np
+
+from .prompts import (
+    DEFAULT_ANSWER_SYSTEM_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
+    DEFAULT_QUESTION_SYSTEM_PROMPT,
+    DEFAULT_STATEMENT_SYSTEM_PROMPT,
+)
+
+
+def _statement_messages(
+    chunk: str,
+    statement_count: int,
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(
+            chunk=json.dumps(chunk, ensure_ascii=False),
+            statement_count=statement_count,
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_STATEMENT_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": user_prompt,
+        },
+    ]
+
+
+def _parse_statement_response(response: str, statement_count: int) -> list[str]:
+    error_message = (
+        f"model response must be a JSON array of exactly {statement_count} non-empty strings"
+    )
+    try:
+        statements = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if (
+        not isinstance(statements, list)
+        or len(statements) != statement_count
+        or any(not isinstance(statement, str) or not statement.strip() for statement in statements)
+    ):
+        raise ValueError(error_message)
+    return [statement.strip() for statement in statements]
+
+
+def _information_preservation_messages(
+    segment: str,
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(segment=json.dumps(segment, ensure_ascii=False))
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _parse_information_preservation_response(response: object) -> tuple[str, list[str]]:
+    error_message = (
+        "model response must be a JSON object with one non-empty true_statement and exactly "
+        "three distinct non-empty false_statements"
+    )
+    if not isinstance(response, str):
+        raise ValueError(error_message)
+    try:
+        statements = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if not isinstance(statements, dict) or set(statements) != {
+        "true_statement",
+        "false_statements",
+    }:
+        raise ValueError(error_message)
+
+    true_statement = statements["true_statement"]
+    false_statements = statements["false_statements"]
+    if (
+        not isinstance(true_statement, str)
+        or not true_statement.strip()
+        or not isinstance(false_statements, list)
+        or len(false_statements) != 3
+        or any(
+            not isinstance(statement, str) or not statement.strip()
+            for statement in false_statements
+        )
+    ):
+        raise ValueError(error_message)
+
+    true_statement = true_statement.strip()
+    false_statements = [statement.strip() for statement in false_statements]
+    if len(set(false_statements)) != 3 or true_statement in false_statements:
+        raise ValueError(error_message)
+    return true_statement, false_statements
+
+
+def _information_preservation_evaluation_messages(
+    statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    prompt: str,
+) -> list[dict[str, str]]:
+    numbered_statements = [
+        {"index": index, "statement": statement}
+        for index, statement in enumerate(statements, start=1)
+    ]
+    try:
+        user_prompt = prompt.format(
+            statements=json.dumps(numbered_statements, ensure_ascii=False),
+            relevant_chunks=json.dumps(relevant_chunks, ensure_ascii=False),
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _parse_information_preservation_evaluation_response(response: object) -> int:
+    error_message = (
+        "model response must be a JSON object containing only selected_index from 1 to 4"
+    )
+    if not isinstance(response, str):
+        raise ValueError(error_message)
+    try:
+        selection = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if not isinstance(selection, dict) or set(selection) != {"selected_index"}:
+        raise ValueError(error_message)
+    selected_index = selection["selected_index"]
+    if (
+        not isinstance(selected_index, int)
+        or isinstance(selected_index, bool)
+        or not 1 <= selected_index <= 4
+    ):
+        raise ValueError(error_message)
+    return selected_index
+
+
+def _question_messages(
+    chunk: str,
+    question_count: int,
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(
+            chunk=json.dumps(chunk, ensure_ascii=False),
+            question_count=question_count,
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {
+            "role": "system",
+            "content": DEFAULT_QUESTION_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": user_prompt,
+        },
+    ]
+
+
+def _parse_question_response(response: str, question_count: int) -> list[str]:
+    error_message = (
+        f"model response must be a JSON array of exactly {question_count} non-empty strings"
+    )
+    try:
+        questions = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise ValueError(error_message) from error
+    if (
+        not isinstance(questions, list)
+        or len(questions) != question_count
+        or any(not isinstance(question, str) or not question.strip() for question in questions)
+    ):
+        raise ValueError(error_message)
+    return [question.strip() for question in questions]
+
+
+def _answer_messages(
+    question: str,
+    chunk: str,
+    additional_chunks: Sequence[str],
+    prompt: str,
+) -> list[dict[str, str]]:
+    try:
+        user_prompt = prompt.format(
+            question=json.dumps(question, ensure_ascii=False),
+            chunk=json.dumps(chunk, ensure_ascii=False),
+            additional_chunks=json.dumps(list(additional_chunks), ensure_ascii=False),
+        )
+    except (IndexError, KeyError, ValueError) as error:
+        raise ValueError("prompt must be a valid format string") from error
+    return [
+        {"role": "system", "content": DEFAULT_ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _clean_answer(response: object, question_index: int) -> str:
+    if not isinstance(response, str) or not response.strip():
+        raise ValueError(f"answer for question {question_index} must not be empty")
+    return response.strip()
 
 
 def _validate_embedding_arguments(

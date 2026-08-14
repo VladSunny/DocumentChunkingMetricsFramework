@@ -4,7 +4,7 @@ import os
 
 from dotenv import load_dotenv
 
-from chunking_metrics.preparation import evaluate_information_preservation_api
+from chunking_metrics.preparations import api
 
 TRUE_STATEMENT = "Читальный зал рассчитан на 120 посетителей."
 FALSE_STATEMENTS = [
@@ -30,7 +30,7 @@ def main() -> None:
     if not api_key:
         raise RuntimeError("API_KEY is required for the API smoke test")
 
-    score = evaluate_information_preservation_api(
+    score = api.evaluate_information_preservation(
         TRUE_STATEMENT,
         FALSE_STATEMENTS,
         RELEVANT_CHUNKS,

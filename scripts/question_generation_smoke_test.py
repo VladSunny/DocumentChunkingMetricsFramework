@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from chunking_metrics.preparation import generate_questions_local
+from chunking_metrics.preparations import local
 
 CHUNK = (
     "Чанкирование делит исходный документ на фрагменты для последующего поиска. "
@@ -12,7 +12,7 @@ QUESTION_COUNT = 5
 
 def main() -> None:
     load_dotenv()
-    questions = generate_questions_local(
+    questions = local.generate_questions(
         CHUNK,
         question_count=QUESTION_COUNT,
         device="cpu",

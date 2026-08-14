@@ -1,7 +1,7 @@
 import numpy as np
 
 from chunking_metrics.metrics import contextual_coherence, intrachunk_cohesion
-from chunking_metrics.preparation import calculate_embeddings
+from chunking_metrics.preparations import local
 
 SENTENCES = [
     "Иван подписал договор на следующий день.",
@@ -11,8 +11,8 @@ SENTENCES = [
 
 
 def main() -> None:
-    sentence_embeddings = calculate_embeddings(SENTENCES, device="cpu")
-    single_embedding = calculate_embeddings(SENTENCES[0], device="cpu")
+    sentence_embeddings = local.calculate_embeddings(SENTENCES, device="cpu")
+    single_embedding = local.calculate_embeddings(SENTENCES[0], device="cpu")
 
     assert sentence_embeddings.shape[0] == len(SENTENCES)
     assert sentence_embeddings.ndim == 2

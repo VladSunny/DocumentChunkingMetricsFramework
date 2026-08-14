@@ -1,10 +1,10 @@
 from dotenv import load_dotenv
 
-from chunking_metrics.preparation import calculate_perplexity
+from chunking_metrics.preparations import local
 
 load_dotenv()
 
-value = calculate_perplexity(
+value = local.calculate_perplexity(
     "Он подписал договор на следующий день.",
     device="cpu",
 )
