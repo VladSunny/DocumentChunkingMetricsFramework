@@ -183,6 +183,127 @@ class FakeAnswerModel:
         return torch.cat((input_ids, torch.tensor([[20]], dtype=torch.long)), dim=1)
 
 
+@pytest.mark.parametrize(
+    ("temperature", "expected_generation_arguments"),
+    [
+        (0.0, {"do_sample": False}),
+        (0.4, {"do_sample": True, "temperature": 0.4}),
+    ],
+)
+def test_generate_text_selects_decoding_mode_and_decodes_only_new_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+    temperature: float,
+    expected_generation_arguments: dict[str, object],
+) -> None:
+    tokenizer = FakeStatementTokenizer(" Ответ. ")
+    model = FakeStatementModel()
+    loads: list[tuple[str, str]] = []
+
+    def load_model(model_name: str, device: str) -> tuple[Any, Any, int]:
+        loads.append((model_name, device))
+        return tokenizer, model, 32
+
+    monkeypatch.setattr(local, "_load_model_and_tokenizer", load_model)
+
+    response = local._generate_text(
+        [{"role": "user", "content": "Вопрос?"}],
+        " model ",
+        temperature=temperature,
+        max_new_tokens=4,
+        device="cpu",
+        chat_template_error="missing template",
+        context_window_error="context overflow",
+    )
+
+    assert response == " Ответ. "
+    assert loads == [("model", "cpu")]
+    assert tokenizer.decoded_ids == [20, 21]
+    assert model.generation_arguments is not None
+    for name, value in expected_generation_arguments.items():
+        assert model.generation_arguments[name] == value
+    if temperature == 0:
+        assert "temperature" not in model.generation_arguments
+
+
+def test_generate_text_uses_eos_token_for_padding_when_pad_token_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer("Ответ.")
+    tokenizer.pad_token_id = None
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        local,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    local._generate_text(
+        [{"role": "user", "content": "Вопрос?"}],
+        "model",
+        temperature=0.0,
+        max_new_tokens=4,
+        device="cpu",
+        chat_template_error="missing template",
+        context_window_error="context overflow",
+    )
+
+    assert model.generation_arguments is not None
+    assert model.generation_arguments["pad_token_id"] == tokenizer.eos_token_id
+
+
+def test_generate_text_rejects_prompt_and_response_that_exceed_context_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer("Ответ.")
+    model = FakeStatementModel()
+    monkeypatch.setattr(
+        local,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 5),
+    )
+
+    with pytest.raises(ValueError, match="custom context overflow"):
+        local._generate_text(
+            [{"role": "user", "content": "Вопрос?"}],
+            "model",
+            temperature=0.0,
+            max_new_tokens=4,
+            device="cpu",
+            chat_template_error="missing template",
+            context_window_error="custom context overflow",
+        )
+
+    assert model.generation_arguments is None
+
+
+def test_generate_text_reports_custom_error_when_chat_template_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeStatementTokenizer("Ответ.")
+    model = FakeStatementModel()
+
+    def reject_chat_template(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("Cannot use chat template functions")
+
+    tokenizer.apply_chat_template = reject_chat_template  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        local,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, model, 32),
+    )
+
+    with pytest.raises(ValueError, match="custom missing template"):
+        local._generate_text(
+            [{"role": "user", "content": "Вопрос?"}],
+            "model",
+            temperature=0.0,
+            max_new_tokens=4,
+            device="cpu",
+            chat_template_error="custom missing template",
+            context_window_error="context overflow",
+        )
+
+
 def install_fake_components(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -1167,7 +1288,8 @@ def test_generate_answers_returns_answers_in_order_with_per_question_context(
     )
 
     assert result == ["Первый ответ.", "Второй ответ."]
-    assert loads == [("model", "cpu")]
+    assert loads
+    assert set(loads) == {("model", "cpu")}
     assert len(model.generation_arguments) == 2
     first_prompt = tokenizer.messages[0][-1]["content"]
     second_prompt = tokenizer.messages[1][-1]["content"]

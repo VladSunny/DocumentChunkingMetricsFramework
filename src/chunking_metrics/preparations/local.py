@@ -70,6 +70,49 @@ def _load_model_and_tokenizer(model_name: str, device: str) -> tuple[Any, Any, i
     return tokenizer, model, _model_max_length(tokenizer, model)
 
 
+def _generate_text(
+    messages: list[dict[str, str]],
+    model_name: str,
+    *,
+    temperature: float,
+    max_new_tokens: int,
+    device: str | None,
+    chat_template_error: str,
+    context_window_error: str,
+) -> str:
+    resolved_device = _resolve_device(device)
+    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
+    try:
+        model_inputs = tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            return_dict=True,
+        )
+    except ValueError as error:
+        raise ValueError(chat_template_error) from error
+    model_inputs = {name: tensor.to(resolved_device) for name, tensor in model_inputs.items()}
+    prompt_length = model_inputs["input_ids"].shape[-1]
+    if prompt_length + max_new_tokens > max_length:
+        raise ValueError(context_window_error)
+
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
+    generation_arguments: dict[str, Any] = {
+        **model_inputs,
+        "do_sample": temperature > 0,
+        "max_new_tokens": max_new_tokens,
+        "pad_token_id": pad_token_id,
+    }
+    if temperature > 0:
+        generation_arguments["temperature"] = temperature
+    with torch.inference_mode():
+        output_ids = model.generate(**generation_arguments)
+    return tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
+
+
 @lru_cache(maxsize=1)
 def _load_embedding_model(model_name: str, device: str) -> SentenceTransformer:
     model = SentenceTransformer(model_name, device=device)
@@ -344,46 +387,22 @@ def generate_answers(
         max_new_tokens,
         device,
     )
-    resolved_device = _resolve_device(device)
-    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
     answers: list[str] = []
     for index, (question, additional_chunks) in enumerate(
         zip(question_items, additional_chunk_items, strict=True)
     ):
         messages = utils._answer_messages(question, chunk, additional_chunks, prompt)
-        try:
-            model_inputs = tokenizer.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-                return_dict=True,
-            )
-        except ValueError as error:
-            raise ValueError(
-                f"question {index}: model tokenizer must define a chat template"
-            ) from error
-        model_inputs = {name: tensor.to(resolved_device) for name, tensor in model_inputs.items()}
-        prompt_length = model_inputs["input_ids"].shape[-1]
-        if prompt_length + max_new_tokens > max_length:
-            raise ValueError(
+        response = _generate_text(
+            messages,
+            model_name,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            device=device,
+            chat_template_error=f"question {index}: model tokenizer must define a chat template",
+            context_window_error=(
                 f"question {index} and generated answer do not fit within the model context window"
-            )
-
-        pad_token_id = tokenizer.pad_token_id
-        if pad_token_id is None:
-            pad_token_id = tokenizer.eos_token_id
-        generation_arguments: dict[str, Any] = {
-            **model_inputs,
-            "do_sample": temperature > 0,
-            "max_new_tokens": max_new_tokens,
-            "pad_token_id": pad_token_id,
-        }
-        if temperature > 0:
-            generation_arguments["temperature"] = temperature
-        with torch.inference_mode():
-            output_ids = model.generate(**generation_arguments)
-        response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
+            ),
+        )
         answers.append(utils._clean_answer(response, index))
     return answers
 
@@ -433,36 +452,17 @@ def generate_statements(
         device,
     )
     messages = utils._statement_messages(chunk, statement_count, prompt)
-    resolved_device = _resolve_device(device)
-    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
-    try:
-        model_inputs = tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-            return_dict=True,
-        )
-    except ValueError as error:
-        raise ValueError("model tokenizer must define a chat template") from error
-    model_inputs = {name: tensor.to(resolved_device) for name, tensor in model_inputs.items()}
-    prompt_length = model_inputs["input_ids"].shape[-1]
-    if prompt_length + max_new_tokens > max_length:
-        raise ValueError("chunk and generated response do not fit within the model context window")
-
-    pad_token_id = tokenizer.pad_token_id
-    if pad_token_id is None:
-        pad_token_id = tokenizer.eos_token_id
-    with torch.inference_mode():
-        output_ids = model.generate(
-            **model_inputs,
-            do_sample=True,
-            temperature=temperature,
-            max_new_tokens=max_new_tokens,
-            pad_token_id=pad_token_id,
-        )
-    response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
-    # print(response)
+    response = _generate_text(
+        messages,
+        model_name,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        chat_template_error="model tokenizer must define a chat template",
+        context_window_error=(
+            "chunk and generated response do not fit within the model context window"
+        ),
+    )
     return utils._parse_statement_response(response, statement_count)
 
 
@@ -511,34 +511,15 @@ def generate_questions(
         device,
     )
     messages = utils._question_messages(chunk, question_count, prompt)
-    resolved_device = _resolve_device(device)
-    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
-    try:
-        model_inputs = tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-            return_dict=True,
-        )
-    except ValueError as error:
-        raise ValueError("model tokenizer must define a chat template") from error
-    model_inputs = {name: tensor.to(resolved_device) for name, tensor in model_inputs.items()}
-    prompt_length = model_inputs["input_ids"].shape[-1]
-    if prompt_length + max_new_tokens > max_length:
-        raise ValueError("chunk and generated response do not fit within the model context window")
-
-    pad_token_id = tokenizer.pad_token_id
-    if pad_token_id is None:
-        pad_token_id = tokenizer.eos_token_id
-    with torch.inference_mode():
-        output_ids = model.generate(
-            **model_inputs,
-            do_sample=True,
-            temperature=temperature,
-            max_new_tokens=max_new_tokens,
-            pad_token_id=pad_token_id,
-        )
-    response = tokenizer.decode(output_ids[0, prompt_length:], skip_special_tokens=True)
-    print(response)
+    response = _generate_text(
+        messages,
+        model_name,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        chat_template_error="model tokenizer must define a chat template",
+        context_window_error=(
+            "chunk and generated response do not fit within the model context window"
+        ),
+    )
     return utils._parse_question_response(response, question_count)
