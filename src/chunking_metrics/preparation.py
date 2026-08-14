@@ -699,8 +699,8 @@ def _answer_messages(
 
 
 def _clean_answer(response: object, question_index: int) -> str:
-    # if not isinstance(response, str) or not response.strip():
-    #    raise ValueError(f"answer for question {question_index} must not be empty")
+    if not isinstance(response, str) or not response.strip():
+       raise ValueError(f"answer for question {question_index} must not be empty")
     return response.strip()
 
 
