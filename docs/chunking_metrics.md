@@ -26,7 +26,7 @@
 | **HOPE Information Preservation** | сохранение исходной информации | document + chunks + LLM + retrieval | да | document-level |
 | **HOPE aggregate** | совокупную HOPE-оценку | три компоненты HOPE | да | composite |
 
-# 1. Size Compliance (SC)
+# 1. [Size Compliance (SC)](AdaptiveChunkingOptimizingChunking-MethodSelectionforRAG.pdf)
 
 ## Идея
 
@@ -81,7 +81,7 @@ $$
 
 ---
 
-# 2. Block Integrity (BI)
+# 2. [Block Integrity (BI)](AdaptiveChunkingOptimizingChunking-MethodSelectionforRAG.pdf)
 
 ## Идея
 
@@ -129,7 +129,7 @@ $$
 
 ---
 
-# 3. Intrachunk Cohesion (ICC)
+# 3. [Intrachunk Cohesion (ICC)](AdaptiveChunkingOptimizingChunking-MethodSelectionforRAG.pdf)
 
 ## Идея
 
@@ -185,7 +185,7 @@ $$
 
 ---
 
-# 4. Contextual Coherence (DCC)
+# 4. [Contextual Coherence (DCC)](AdaptiveChunkingOptimizingChunking-MethodSelectionforRAG.pdf)
 
 ## Идея
 
@@ -234,11 +234,15 @@ $$
 
 ---
 
-# 5. Coreference Integrity (RC)
+# 5. [Coreference Integrity (RC)](AdaptiveChunkingOptimizingChunking-MethodSelectionforRAG.pdf)
 
 ## Идея
 
 Coreference Integrity измеряет, насколько границы чанков разрывают отношения между выражениями, которые ссылаются на одну и ту же сущность.
+
+В исходной работе Adaptive Chunking эта метрика называется **References Completeness**.
+В проекте сохранено название **Coreference Integrity**, подчёркивающее проверяемое
+свойство, а обозначение **RC** соответствует исходной работе.
 
 Например:
 
@@ -290,7 +294,7 @@ $$
 
 ---
 
-# 6. Boundary Clarity (BC)
+# 6. [Boundary Clarity (BC)](MoCMixturesofTextChunkingLearnersforRetrieval-AugmentedGenerationSystem.pdf)
 
 ## Идея
 
@@ -346,7 +350,7 @@ $$
 
 ---
 
-# 7. ChunkScore
+# 7. [ChunkScore](qchunker-paper.pdf)
 
 ## Идея
 
@@ -539,7 +543,7 @@ $\frac{1}{2}\log\det(\Sigma)$. Поэтому больший log-determinant и�
 
 ---
 
-# HOPE: общая идея
+# [HOPE: общая идея](Domain-agnosticAutomaticEvaluationTextChunking.pdf)
 
 HOPE (Holistic Passage Evaluation) — автоматическая метрика качества чанкинга, предложенная как domain-agnostic и не требующая human annotations. Она оценивает три уровня качества:
 
@@ -562,7 +566,7 @@ $$
 
 ---
 
-# 8. HOPE Concept Unity
+# 8. [HOPE Concept Unity](Domain-agnosticAutomaticEvaluationTextChunking.pdf)
 
 ## Идея
 
@@ -627,7 +631,7 @@ $$
 
 ---
 
-# 9. HOPE Semantic Independence
+# 9. [HOPE Semantic Independence](Domain-agnosticAutomaticEvaluationTextChunking.pdf)
 
 ## Идея
 
@@ -718,7 +722,7 @@ $$
 
 ---
 
-# 10. HOPE Information Preservation
+# 10. [HOPE Information Preservation](Domain-agnosticAutomaticEvaluationTextChunking.pdf)
 
 ## Идея
 
@@ -819,7 +823,7 @@ $$
 
 ---
 
-# 11. HOPE Aggregate
+# 11. [HOPE Aggregate](Domain-agnosticAutomaticEvaluationTextChunking.pdf)
 
 Полная метрика HOPE объединяет три компоненты арифметическим средним:
 
@@ -912,8 +916,20 @@ BLEU и ROUGE не требуют boundary annotations, но они измеря
 
 # Источники
 
-Основные определения **Concept Unity**, **Semantic Independence**, **Information Preservation** и итоговой формулы **HOPE** взяты из:
-
-> Henrik Brådland, Morten Goodwin, Per-Arne Andersen, Alexander S. Nossum, Aditya Gupta. *A New HOPE: Domain-agnostic Automatic Evaluation of Text Chunking*. SIGIR 2025.
-
-Сведения о **Size Compliance**, **Block Integrity**, **Intrachunk Cohesion**, **Contextual Coherence**, coreference-related integrity, **Boundary Clarity** и **ChunkScore** основаны на собранном обзоре автоматических метрик чанкинга документов для RAG.
+1. Paulo Roberto de Moura Júnior, Jean Lelong, Annabelle Blangero. [*Adaptive
+   Chunking: Optimizing Chunking-Method Selection for
+   RAG*](AdaptiveChunkingOptimizingChunking-MethodSelectionforRAG.pdf). arXiv preprint
+   arXiv:2603.25333 [cs.CL], 2026.
+2. Jihao Zhao, Zhiyuan Ji, Zhaoxin Fan, Hanyu Wang, Simin Niu, Bo Tang, Feiyu Xiong,
+   Zhiyu Li. [*MoC: Mixtures of Text Chunking Learners for Retrieval-Augmented Generation
+   System*](MoCMixturesofTextChunkingLearnersforRetrieval-AugmentedGenerationSystem.pdf).
+   arXiv preprint arXiv:2503.09600 [cs.CL], 2025.
+3. Jihao Zhao, Daixuan Li, Pengfei Li, Shuaishuai Zu, Biao Qin, Hongyan Liu.
+   [*QChunker: Learning Question-Aware Text Chunking for Domain RAG via Multi-Agent
+   Debate*](qchunker-paper.pdf). In *Proceedings of the ACM Web Conference 2026*
+   (WWW '26), ACM, 2026.
+4. Henrik Brådland, Morten Goodwin, Per-Arne Andersen, Alexander S. Nossum, Aditya Gupta.
+   [*A New HOPE: Domain-agnostic Automatic Evaluation of Text
+   Chunking*](Domain-agnosticAutomaticEvaluationTextChunking.pdf). In *Proceedings of the
+   48th International ACM SIGIR Conference on Research and Development in Information
+   Retrieval* (SIGIR '25), ACM, 2025. DOI: 10.1145/3726302.3729882.
