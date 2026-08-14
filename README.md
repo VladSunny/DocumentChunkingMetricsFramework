@@ -4,30 +4,97 @@
 chunking. It measures structural and semantic properties of chunks without gold boundaries,
 reference chunks, annotated questions, or human relevance labels.
 
-Version `0.1.0` implements 7 of the 10 metrics in the project plan:
+## Project plan
 
-- [x] [Size Compliance (SC)](docs/chunking_metrics.md#1-size-compliance-sc)
-- [ ] [Block Integrity (BI)](docs/chunking_metrics.md#2-block-integrity-bi)
-- [x] [Intrachunk Cohesion (ICC)](docs/chunking_metrics.md#3-intrachunk-cohesion-icc)
-- [x] [Contextual Coherence (DCC)](docs/chunking_metrics.md#4-contextual-coherence-dcc)
-- [ ] [Coreference Integrity (RC)](docs/chunking_metrics.md#5-coreference-integrity-rc)
-- [x] [Boundary Clarity (BC)](docs/chunking_metrics.md#6-boundary-clarity-bc)
-- [ ] [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
-- [x] [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity)
-- [x] [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
-- [x] [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
+Calculation readiness, preparation-helper availability, and a complete end-to-end pipeline are
+tracked separately. A checked calculation item means that the public metric function is
+implemented. A checked preparation item means that a corresponding public helper exists in
+`chunking_metrics.preparations`; it does not by itself make the full metric pipeline complete.
 
-Checked entries are usable today. `block_integrity`, `coreference_integrity`, and `chunk_score`
-exist only as `NotImplementedError` placeholders. Information Preservation is implemented as
-generation and evaluation helpers rather than as a metric function. HOPE Aggregate must currently
-be calculated by the caller.
+- [Size Compliance (SC)](docs/chunking_metrics.md#1-size-compliance-sc)
+  - [x] Calculation
+  - [ ] Preparation: calculate chunk lengths
+- [Block Integrity (BI)](docs/chunking_metrics.md#2-block-integrity-bi)
+  - [ ] Calculation
+  - [ ] Preparation: extract structural spans
+- [Intrachunk Cohesion (ICC)](docs/chunking_metrics.md#3-intrachunk-cohesion-icc)
+  - [x] Calculation
+  - [ ] Preparation: split chunks into sentences
+  - Embeddings
+    - [x] Local
+    - [ ] API
+- [Contextual Coherence (DCC)](docs/chunking_metrics.md#4-contextual-coherence-dcc)
+  - [x] Calculation
+  - [ ] Preparation: extract context windows
+  - Embeddings
+    - [x] Local
+    - [ ] API
+- [Coreference Integrity (RC)](docs/chunking_metrics.md#5-coreference-integrity-rc)
+  - [ ] Calculation
+  - Coreference resolution
+    - [ ] Local
+    - [ ] API
+- [Boundary Clarity (BC)](docs/chunking_metrics.md#6-boundary-clarity-bc)
+  - [x] Calculation
+  - Perplexity/scoring
+    - [x] Local
+    - [ ] API
+- [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
+  - [ ] Calculation
+  - Perplexity
+    - [x] Local
+    - [ ] API
+  - Embeddings
+    - [x] Local
+    - [ ] API
+- [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity)
+  - [x] Calculation
+  - Statements
+    - [x] Local
+    - [x] API
+  - Embeddings
+    - [x] Local
+    - [ ] API
+- [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
+  - [x] Calculation
+  - Questions
+    - [x] Local
+    - [x] API
+  - Retrieval
+    - [x] Local
+    - [ ] API
+  - Answers
+    - [x] Local
+    - [x] API
+  - Answer embeddings
+    - [x] Local
+    - [ ] API
+- [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
+  - [ ] Calculation
+  - [ ] Preparation: sample document segments
+  - Statements
+    - [ ] Local
+    - [x] API
+  - Retrieval
+    - [x] Local
+    - [ ] API
+  - Evaluation
+    - [ ] Local
+    - [x] API
+  - [ ] Preparation: aggregate evaluation results
+
+`block_integrity`, `coreference_integrity`, and `chunk_score` currently exist only as
+`NotImplementedError` placeholders. Information Preservation has API generation and evaluation
+helpers, but no calculation function or complete preparation pipeline. HOPE Aggregate must also be
+calculated by the caller.
 
 ## Features
 
-- Six metric functions for size, cohesion, context, boundaries, Concept Unity, and Semantic
-  Independence.
-- Eleven preparation functions for embeddings, perplexity, retrieval, local or API-based
-  statement/question/answer generation, and API-based Information Preservation.
+- Six implemented calculation functions for size, cohesion, context, boundaries, Concept Unity,
+  and Semantic Independence, plus three planned metric placeholders.
+- Eleven public preparation helpers: six local and five API-based helpers for the implemented
+  model-backed steps. The roadmap above identifies the remaining preparation work needed for
+  complete end-to-end pipelines.
 - Ten public prompt constants, including system and user prompts for all generation workflows.
 - Local Hugging Face inference and provider-neutral OpenAI-compatible Chat Completions helpers.
 
@@ -106,33 +173,40 @@ from chunking_metrics import metrics, preparations, prompts
 
 ### Metrics (`chunking_metrics.metrics`)
 
-| Function | Input | Result |
-| --- | --- | --- |
-| `size_compliance(lengths, min_size, max_size)` | Chunk lengths and an inclusive range | Fraction within the range |
-| `intrachunk_cohesion(embs)` | One sentence-embedding matrix per chunk | Mean sentence-to-centroid similarity |
-| `contextual_coherence(chunk_embs, context_embs)` | One chunk vector and a context matrix | Chunk-to-mean-context similarity |
-| `boundary_clarity(uncond_ppls, cond_ppls)` | `K` unconditional and `K - 1` conditioned perplexities | Mean conditioned/unconditioned ratio |
-| `concept_unity(statements_embs)` | Statement-embedding matrix for one chunk | Mean clipped pairwise similarity |
-| `semantic_independence(standalone_answer_embs, contextual_answer_embs)` | Corresponding answer matrices | Mean clipped pairwise answer similarity |
-
-The module also exposes the unimplemented placeholders `block_integrity`,
-`coreference_integrity`, and `chunk_score`. Calling them raises `NotImplementedError`.
+| Signature | Result |
+| --- | --- |
+| `size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> float` | Fraction of chunk lengths within the inclusive range |
+| `block_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
+| `intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float` | Mean sentence-to-centroid similarity |
+| `contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float` | Chunk-to-mean-context similarity |
+| `coreference_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
+| `boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> float` | Mean conditioned/unconditioned perplexity ratio |
+| `chunk_score(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
+| `concept_unity(statements_embs: np.ndarray) -> float` | Mean clipped pairwise statement similarity |
+| `semantic_independence(standalone_answer_embs: np.ndarray, contextual_answer_embs: np.ndarray) -> float` | Mean clipped similarity of corresponding answers |
 
 ### Input preparation (`chunking_metrics.preparations`)
 
-| Function | Purpose |
+#### Local helpers (`chunking_metrics.preparations.local`)
+
+| Signature | Purpose |
 | --- | --- |
-| `local.calculate_embeddings` | Encode one text or a sequence as normalized embeddings |
-| `local.calculate_perplexity` | Calculate target perplexity, optionally conditioned on preceding text |
-| `local.retrieve_relevant_chunks` | Rank candidate chunks independently for each query |
-| `local.generate_statements` | Generate statements with a local causal chat model |
-| `api.generate_statements` | Generate statements through an OpenAI-compatible API |
-| `local.generate_questions` | Generate questions with a local causal chat model |
-| `api.generate_questions` | Generate questions through an OpenAI-compatible API |
-| `local.generate_answers` | Answer questions with a local causal chat model |
-| `api.generate_answers` | Answer questions through an OpenAI-compatible API |
-| `api.generate_information_preservation_statements` | Generate one true and three false statements |
-| `api.evaluate_information_preservation` | Score one retrieved multiple-choice test as `0` or `1` |
+| `calculate_perplexity(text: str, model_name: str = DEFAULT_PERPLEXITY_MODEL, *, context: str \| None = None, device: str \| None = None) -> float` | Calculate target perplexity, optionally conditioned on preceding text |
+| `calculate_embeddings(texts: str \| Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, device: str \| None = None, batch_size: int = 32) -> np.ndarray` | Encode one text or a sequence as normalized embeddings |
+| `retrieve_relevant_chunks(queries: Sequence[str], candidate_chunks: Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, top_k: int = 3, device: str \| None = None, batch_size: int = 32) -> list[list[str]]` | Rank candidate chunks independently for each query |
+| `generate_answers(questions: Sequence[str], chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, additional_chunks_by_question: Sequence[Sequence[str]] \| None = None, prompt: str = DEFAULT_ANSWER_PROMPT, temperature: float = 0.0, max_new_tokens: int = 128, device: str \| None = None) -> list[str]` | Answer questions with a local causal chat model |
+| `generate_statements(chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_STATEMENT_PROMPT, statement_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None) -> list[str]` | Generate statements with a local causal chat model |
+| `generate_questions(chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_QUESTION_PROMPT, question_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None) -> list[str]` | Generate questions with a local causal chat model |
+
+#### API helpers (`chunking_metrics.preparations.api`)
+
+| Signature | Purpose |
+| --- | --- |
+| `generate_answers(questions: Sequence[str], chunk: str, model_name: str, api_key: str, base_url: str \| None = None, *, additional_chunks_by_question: Sequence[Sequence[str]] \| None = None, prompt: str = DEFAULT_ANSWER_PROMPT, temperature: float = 0.0, max_new_tokens: int = 128) -> list[str]` | Answer questions through an OpenAI-compatible API |
+| `generate_statements(chunk: str, model_name: str = "", api_key: str = "", base_url: str = "", *, prompt: str = DEFAULT_STATEMENT_PROMPT, statement_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256) -> list[str]` | Generate statements through an OpenAI-compatible API |
+| `generate_information_preservation_statements(segment: str, model_name: str = "", api_key: str = "", base_url: str \| None = None, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT, temperature: float = 0.7, max_new_tokens: int = 256) -> tuple[str, list[str]]` | Generate one true and three false statements |
+| `evaluate_information_preservation(true_statement: str, false_statements: Sequence[str], relevant_chunks: Sequence[str], model_name: str, api_key: str, base_url: str \| None = None, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT, temperature: float = 0.0, max_new_tokens: int = 32, seed: int \| None = None) -> int` | Score one retrieved multiple-choice test as `0` or `1` |
+| `generate_questions(chunk: str, model_name: str = "", api_key: str = "", base_url: str = "", *, prompt: str = DEFAULT_QUESTION_PROMPT, question_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256) -> list[str]` | Generate questions through an OpenAI-compatible API |
 
 ### Prompts (`chunking_metrics.prompts`)
 
