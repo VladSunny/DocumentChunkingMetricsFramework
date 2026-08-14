@@ -21,10 +21,34 @@ def test_size_compliance() -> None:
     assert result == 2 / 3
 
 
-def test_intrachunk_cohesion() -> None:
+def test_intrachunk_cohesion_returns_score_for_each_chunk() -> None:
     embs = [np.array([[1.0, 0.0], [0.0, 1.0]]), np.array([[2.0, 0.0]])]
+
     result = intrachunk_cohesion(embs)
-    assert result == pytest.approx((1 / np.sqrt(2) + 1) / 2)
+
+    assert result == pytest.approx([1 / np.sqrt(2), 1.0])
+    assert all(isinstance(score, float) for score in result)
+
+
+@pytest.mark.parametrize(
+    "embs",
+    [
+        [],
+        [np.empty((0, 2))],
+        [np.empty((2, 0))],
+        [np.ones((1, 1, 1))],
+        [np.array([[0.0, 0.0]])],
+        [np.array([[np.nan, 1.0]])],
+        [np.array([[np.inf, 1.0]])],
+        [np.array([[1.0 + 1.0j, 0.0]])],
+        [np.array([["not", "numeric"]])],
+        [np.array([[1.0, 0.0]]), np.empty((0, 2))],
+    ],
+)
+def test_intrachunk_cohesion_returns_empty_list_for_invalid_input(
+    embs: list[np.ndarray],
+) -> None:
+    assert intrachunk_cohesion(embs) == []
 
 
 def test_contextual_coherence() -> None:

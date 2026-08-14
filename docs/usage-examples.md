@@ -37,8 +37,12 @@ embeddings_by_chunk = [
     np.array([[1.0, 0.0], [0.8, 0.2]]),
     np.array([[0.0, 1.0], [0.1, 0.9]]),
 ]
-score = intrachunk_cohesion(embeddings_by_chunk)
-print(score)
+scores_by_chunk = intrachunk_cohesion(embeddings_by_chunk)
+print(scores_by_chunk)
+
+# Aggregate explicitly when a document-level score is needed.
+document_score = float(np.mean(scores_by_chunk))
+print(document_score)
 ```
 
 ### Contextual Coherence
@@ -437,7 +441,8 @@ sc = size_compliance([len(chunk) for chunk in chunks], min_size=80, max_size=240
 sentence_embeddings_by_chunk = [
     local.calculate_embeddings(sentences, device="cpu") for sentences in sentences_by_chunk
 ]
-icc = intrachunk_cohesion(sentence_embeddings_by_chunk)
+icc_by_chunk = intrachunk_cohesion(sentence_embeddings_by_chunk)
+icc = float(np.mean(icc_by_chunk))
 
 chunk_embeddings = local.calculate_embeddings(chunks, device="cpu")
 dcc_by_chunk = []

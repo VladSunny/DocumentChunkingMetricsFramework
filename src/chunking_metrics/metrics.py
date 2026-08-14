@@ -46,29 +46,42 @@ def block_integrity(*args: Any, **kwargs: Any) -> None:
     raise NotImplementedError("Not implemented yet")
 
 
-def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float:
-    """Intrachunk Cohesion evaluates the internal semantic uniformity of a chunk.
-    A good chunk should contain sentences related to a related topic or a common semantic context.
-    - embs -> array (chunks, sentences, emb dims)
+def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> list[float]:
+    """Evaluate the internal semantic uniformity of each chunk.
+
+    Args:
+        embs: One sentence-embedding matrix with shape ``(sentences, embedding_dims)``
+            per chunk.
+
+    Returns:
+        Sentence-to-centroid similarity for each chunk, in input order. Empty or invalid
+        inputs produce an empty list.
     """
 
     embs = list(embs)
     if len(embs) <= 0:
-        return 0.0
+        return []
 
-    chunk_cohesions = []
+    chunk_cohesions: list[float] = []
     for chunk_embs in embs:
-        if chunk_embs.ndim != 2 or chunk_embs.shape[0] <= 0:
-            return 0.0
+        if (
+            not isinstance(chunk_embs, np.ndarray)
+            or chunk_embs.ndim != 2
+            or min(chunk_embs.shape) <= 0
+            or not np.issubdtype(chunk_embs.dtype, np.number)
+            or np.iscomplexobj(chunk_embs)
+            or not np.all(np.isfinite(chunk_embs))
+        ):
+            return []
 
         centroid = np.mean(chunk_embs, axis=0)
         similarities = cosine_similarity(chunk_embs, centroid)
         if np.any(np.isnan(similarities)):
-            return 0.0
+            return []
 
-        chunk_cohesions.append(np.mean(similarities))
+        chunk_cohesions.append(float(np.mean(similarities)))
 
-    return float(np.mean(chunk_cohesions))
+    return chunk_cohesions
 
 
 def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float:

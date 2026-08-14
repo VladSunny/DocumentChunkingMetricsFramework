@@ -154,8 +154,8 @@ sentences_by_chunk = [
     ["Cohesion measures relatedness.", "Related sentences belong together."],
 ]
 embeddings_by_chunk = [local.calculate_embeddings(sentences) for sentences in sentences_by_chunk]
-score = intrachunk_cohesion(embeddings_by_chunk)
-print(score)
+scores_by_chunk = intrachunk_cohesion(embeddings_by_chunk)
+print(scores_by_chunk)
 ```
 
 Model helpers may download their default Hugging Face models on first use. The
@@ -177,7 +177,7 @@ from chunking_metrics import metrics, preparations, prompts
 | --- | --- |
 | `size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> float` | Fraction of chunk lengths within the inclusive range |
 | `block_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
-| `intrachunk_cohesion(embs: Iterable[np.ndarray]) -> float` | Mean sentence-to-centroid similarity |
+| `intrachunk_cohesion(embs: Iterable[np.ndarray]) -> list[float]` | Sentence-to-centroid similarity for each chunk |
 | `contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float` | Chunk-to-mean-context similarity |
 | `coreference_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
 | `boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> float` | Mean conditioned/unconditioned perplexity ratio |
