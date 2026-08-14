@@ -11,14 +11,46 @@ from chunking_metrics.metrics import (
 )
 
 
-def test_size_compliance() -> None:
+def test_size_compliance_returns_score_for_each_length_in_input_order() -> None:
     lengths = np.array([5, 10, 20])
     result = size_compliance(
         lengths=lengths,
         min_size=5,
         max_size=10,
     )
-    assert result == 2 / 3
+    assert result == [1.0, 1.0, 0.0]
+    assert all(isinstance(score, float) for score in result)
+
+
+def test_size_compliance_materializes_generator_input() -> None:
+    lengths = (length for length in [4, 5, 10, 11])
+
+    assert size_compliance(lengths, min_size=5, max_size=10) == [0.0, 1.0, 1.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    ("lengths", "min_size", "max_size"),
+    [
+        ([], 5, 10),
+        (np.array([[5, 10]]), 5, 10),
+        (["5", "10"], 5, 10),
+        ([5, np.nan], 5, 10),
+        ([5, np.inf], 5, 10),
+        ([5 + 0j], 5, 10),
+        ([5], -1, 10),
+        ([5], 5, -1),
+        ([5], 10, 5),
+        ([5], np.nan, 10),
+        ([5], 5, np.inf),
+        ([5], "5", 10),
+    ],
+)
+def test_size_compliance_returns_empty_list_for_invalid_inputs(
+    lengths: object,
+    min_size: object,
+    max_size: object,
+) -> None:
+    assert size_compliance(lengths, min_size, max_size) == []
 
 
 def test_intrachunk_cohesion_returns_score_for_each_chunk() -> None:
@@ -60,9 +92,10 @@ def test_contextual_coherence() -> None:
 
 def test_boundary_clarity() -> None:
     unc_ppls = np.array([10.0, 8.0, 6.0])
-    cond_ppls = np.array([4.0, 3.0])
+    cond_ppls = np.array([4.0, 1.2])
     result = boundary_clarity(unc_ppls, cond_ppls)
-    assert result == 0.5
+    assert result == pytest.approx([0.5, 0.2])
+    assert all(isinstance(score, float) for score in result)
 
 
 @pytest.mark.parametrize(
@@ -78,11 +111,11 @@ def test_boundary_clarity() -> None:
         (np.array([1.0, 2.0]), np.array([np.nan])),
     ],
 )
-def test_boundary_clarity_returns_zero_for_invalid_inputs(
+def test_boundary_clarity_returns_empty_list_for_invalid_inputs(
     uncond_ppls: np.ndarray,
     cond_ppls: np.ndarray,
 ) -> None:
-    assert boundary_clarity(uncond_ppls, cond_ppls) == 0.0
+    assert boundary_clarity(uncond_ppls, cond_ppls) == []
 
 
 def test_concept_unity_averages_clipped_pairwise_similarities() -> None:

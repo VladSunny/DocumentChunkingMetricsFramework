@@ -135,11 +135,17 @@ uv add ../DocumentChunkingMetricsFramework/dist/chunking_metrics-0.1.0-py3-none-
 Size Compliance needs no model:
 
 ```python
+import numpy as np
+
 from chunking_metrics.metrics import size_compliance
 
 chunk_lengths = [180, 240, 510, 320]
-score = size_compliance(chunk_lengths, min_size=200, max_size=500)
-print(score)  # 0.5
+scores = size_compliance(chunk_lengths, min_size=200, max_size=500)
+print(scores)  # [0.0, 1.0, 0.0, 1.0]
+
+# Aggregate explicitly when a document-level score is needed.
+document_score = float(np.mean(scores))
+print(document_score)  # 0.5
 ```
 
 A model-backed metric is prepared explicitly. For example, Intrachunk Cohesion expects one
@@ -175,12 +181,12 @@ from chunking_metrics import metrics, preparations, prompts
 
 | Signature | Result |
 | --- | --- |
-| `size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> float` | Fraction of chunk lengths within the inclusive range |
+| `size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> list[float]` | One inclusive-range compliance score per chunk |
 | `block_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
 | `intrachunk_cohesion(embs: Iterable[np.ndarray]) -> list[float]` | Sentence-to-centroid similarity for each chunk |
 | `contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float` | Chunk-to-mean-context similarity |
 | `coreference_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
-| `boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> float` | Mean conditioned/unconditioned perplexity ratio |
+| `boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> list[float]` | Conditioned/unconditioned perplexity ratio for each boundary |
 | `chunk_score(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
 | `concept_unity(statements_embs: np.ndarray) -> float` | Mean clipped pairwise statement similarity |
 | `semantic_independence(standalone_answer_embs: np.ndarray, contextual_answer_embs: np.ndarray) -> float` | Mean clipped similarity of corresponding answers |

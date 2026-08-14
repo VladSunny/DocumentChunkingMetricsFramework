@@ -14,14 +14,21 @@ with those supplied by your provider.
 
 ### Size Compliance
 
-`size_compliance` returns the fraction of chunk lengths in an inclusive range.
+`size_compliance` returns one score per chunk: `1.0` when its length is in the inclusive range and
+`0.0` otherwise. Invalid input produces an empty list.
 
 ```python
+import numpy as np
+
 from chunking_metrics.metrics import size_compliance
 
 lengths = [180, 240, 510, 320]
-score = size_compliance(lengths, min_size=200, max_size=500)
-print(score)  # 0.5
+scores_by_chunk = size_compliance(lengths, min_size=200, max_size=500)
+print(scores_by_chunk)  # [0.0, 1.0, 0.0, 1.0]
+
+# Aggregate explicitly when a document-level score is needed.
+document_score = float(np.mean(scores_by_chunk))
+print(document_score)  # 0.5
 ```
 
 ### Intrachunk Cohesion
@@ -73,8 +80,12 @@ from chunking_metrics.metrics import boundary_clarity
 
 unconditional_perplexities = np.array([22.0, 30.0, 25.0])
 conditional_perplexities = np.array([18.0, 20.0])
-score = boundary_clarity(unconditional_perplexities, conditional_perplexities)
-print(score)  # mean([18 / 30, 20 / 25])
+scores_by_boundary = boundary_clarity(unconditional_perplexities, conditional_perplexities)
+print(scores_by_boundary)  # [0.6, 0.8]
+
+# Aggregate explicitly when a document-level score is needed.
+document_score = float(np.mean(scores_by_boundary))
+print(document_score)  # 0.7
 ```
 
 ### HOPE Concept Unity
@@ -436,7 +447,8 @@ sentences_by_chunk = [
 ]
 chunks = [" ".join(sentences) for sentences in sentences_by_chunk]
 
-sc = size_compliance([len(chunk) for chunk in chunks], min_size=80, max_size=240)
+sc_by_chunk = size_compliance([len(chunk) for chunk in chunks], min_size=80, max_size=240)
+sc = float(np.mean(sc_by_chunk))
 
 sentence_embeddings_by_chunk = [
     local.calculate_embeddings(sentences, device="cpu") for sentences in sentences_by_chunk
@@ -460,7 +472,8 @@ conditional = np.array(
         for previous, current in zip(chunks, chunks[1:])
     ]
 )
-bc = boundary_clarity(unconditional, conditional)
+bc_by_boundary = boundary_clarity(unconditional, conditional)
+bc = float(np.mean(bc_by_boundary))
 
 print({"SC": sc, "ICC": icc, "DCC": dcc, "BC": bc})
 ```

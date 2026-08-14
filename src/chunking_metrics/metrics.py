@@ -9,23 +9,46 @@ from .utils import cosine_similarity
 logger = logging.getLogger(__name__)
 
 
-def size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> float:
-    """Returns the ratio of the number of chunks that fit the size to the total number of chunks"""
-    lengths = np.array(lengths)
+def size_compliance(lengths: Iterable[int], min_size: int, max_size: int) -> list[float]:
+    """Evaluate whether each chunk length is within an allowed range.
 
-    if len(lengths) <= 0:
-        return 0
-    if min_size < 0:
-        return 0
-    if max_size < 0:
-        return 0
-    if max_size < min_size:
-        return 0
+    Args:
+        lengths: One numeric length per chunk. Any one-dimensional iterable is accepted and
+            materialized, including lists, NumPy arrays, and generators.
+        min_size: Non-negative lower bound for an acceptable chunk length.
+        max_size: Non-negative upper bound for an acceptable chunk length. The range
+            ``[min_size, max_size]`` includes both endpoints.
 
-    min_mask = lengths >= min_size
-    max_mask = lengths <= max_size
-    relevant_cnt = np.sum(min_mask & max_mask)
-    return relevant_cnt / lengths.shape[0]
+    Returns:
+        One Python ``float`` per input chunk, in input order: ``1.0`` when its length is within
+        the inclusive range and ``0.0`` otherwise. The list has the same length as ``lengths``.
+        Empty, multidimensional, non-numeric, non-finite, or otherwise invalid inputs, as well
+        as invalid bounds, produce an empty list.
+    """
+    try:
+        lengths_array = np.asarray(list(lengths))
+        bounds = np.asarray([min_size, max_size])
+    except (TypeError, ValueError):
+        return []
+
+    if (
+        lengths_array.ndim != 1
+        or lengths_array.size == 0
+        or not np.issubdtype(lengths_array.dtype, np.number)
+        or np.iscomplexobj(lengths_array)
+        or not np.all(np.isfinite(lengths_array))
+        or bounds.ndim != 1
+        or bounds.size != 2
+        or not np.issubdtype(bounds.dtype, np.number)
+        or np.iscomplexobj(bounds)
+        or not np.all(np.isfinite(bounds))
+        or min_size < 0
+        or max_size < min_size
+    ):
+        return []
+
+    scores = (lengths_array >= min_size) & (lengths_array <= max_size)
+    return scores.astype(float).tolist()
 
 
 def block_integrity(*args: Any, **kwargs: Any) -> None:
@@ -138,28 +161,45 @@ def coreference_integrity(*args: Any, **kwargs: Any) -> None:
     raise NotImplementedError("Not implemented yet")
 
 
-def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> float:
-    """Boundary Clarity evaluates how independent two neighboring chunks are
-    from the point of view of the causal language model.
+def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> list[float]:
+    """Evaluate the clarity of every boundary between neighboring chunks.
 
-    If the previous chunk makes it much easier for the language model to predict the next one,
-    this indicates a strong relationship between them and a potentially weak boundary.
+    Args:
+        uncond_ppls: One-dimensional array containing the unconditional perplexity of each of
+            the ``N`` chunks, in document order.
+        cond_ppls: One-dimensional array of length ``N - 1``. Element ``i`` is the perplexity
+            of chunk ``i + 1`` when conditioned on chunk ``i``.
 
-    The metric is based on comparing the unconditional perplexity of the next chunk
-    and the perplexity of the same text in the presence of the previous chunk in the context.
+    Returns:
+        One Python ``float`` per boundary, in document order. Element ``i`` is
+        ``cond_ppls[i] / uncond_ppls[i + 1]`` and corresponds to the boundary between chunks
+        ``i`` and ``i + 1``. For ``N`` chunks, the result therefore has ``N - 1`` elements.
+        Empty, non-one-dimensional, non-numeric, non-finite, non-positive, or shape-mismatched
+        inputs produce an empty list.
     """
-    uncond_ppls = np.asarray(uncond_ppls)
-    cond_ppls = np.asarray(cond_ppls)
-    if uncond_ppls.ndim != 1 or cond_ppls.ndim != 1:
-        return 0.0
-    if cond_ppls.size == 0 or uncond_ppls.size != cond_ppls.size + 1:
-        return 0.0
-    if not np.all(np.isfinite(uncond_ppls)) or not np.all(np.isfinite(cond_ppls)):
-        return 0.0
-    if np.any(uncond_ppls <= 0) or np.any(cond_ppls <= 0):
-        return 0.0
+    try:
+        uncond_ppls = np.asarray(uncond_ppls)
+        cond_ppls = np.asarray(cond_ppls)
+    except (TypeError, ValueError):
+        return []
 
-    return float(np.mean(cond_ppls / uncond_ppls[1:]))
+    if (
+        uncond_ppls.ndim != 1
+        or cond_ppls.ndim != 1
+        or cond_ppls.size == 0
+        or uncond_ppls.size != cond_ppls.size + 1
+        or not np.issubdtype(uncond_ppls.dtype, np.number)
+        or not np.issubdtype(cond_ppls.dtype, np.number)
+        or np.iscomplexobj(uncond_ppls)
+        or np.iscomplexobj(cond_ppls)
+        or not np.all(np.isfinite(uncond_ppls))
+        or not np.all(np.isfinite(cond_ppls))
+        or np.any(uncond_ppls <= 0)
+        or np.any(cond_ppls <= 0)
+    ):
+        return []
+
+    return (cond_ppls / uncond_ppls[1:]).astype(float).tolist()
 
 
 def chunk_score(*args: Any, **kwargs: Any) -> None:
