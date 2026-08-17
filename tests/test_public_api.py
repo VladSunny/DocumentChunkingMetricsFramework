@@ -1,7 +1,7 @@
 import importlib.util
 
 import chunking_metrics
-from chunking_metrics.metrics import size_compliance
+from chunking_metrics.metrics import chunk_score, semantic_dispersion, size_compliance
 from chunking_metrics.preparations import api, local
 from chunking_metrics.preparations.api import calculation as api_calculation
 from chunking_metrics.preparations.api import generation as api_generation
@@ -15,6 +15,8 @@ def test_public_api_is_grouped_by_module() -> None:
     assert chunking_metrics.__all__ == ["metrics", "preparations", "prompts"]
     assert chunking_metrics.preparations.__all__ == ["local", "api"]
     assert chunking_metrics.metrics.size_compliance is size_compliance
+    assert chunking_metrics.metrics.semantic_dispersion is semantic_dispersion
+    assert chunking_metrics.metrics.chunk_score is chunk_score
     assert chunking_metrics.preparations.local is local
     assert chunking_metrics.preparations.api is api
     assert local.calculate_embeddings is calculate_embeddings

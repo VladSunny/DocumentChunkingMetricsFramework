@@ -39,7 +39,7 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] Local
     - [x] API
 - [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
-  - [ ] Calculation
+  - [x] Calculation
   - Perplexity
     - [x] Local
     - [x] API
@@ -82,15 +82,15 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] API
   - [ ] Preparation: aggregate evaluation results (you can do it by yourself)
 
-`block_integrity`, `coreference_integrity`, and `chunk_score` currently exist only as
-`NotImplementedError` placeholders. Information Preservation has API generation and evaluation
-helpers, but no calculation function or complete preparation pipeline. HOPE Aggregate must also be
-calculated by the caller.
+`block_integrity` and `coreference_integrity` currently exist only as `NotImplementedError`
+placeholders. Information Preservation has API generation and evaluation helpers, but no
+calculation function or complete preparation pipeline. HOPE Aggregate must also be calculated by
+the caller.
 
 ## Features
 
-- Six implemented calculation functions for size, cohesion, context, boundaries, Concept Unity,
-  and Semantic Independence, plus three planned metric placeholders.
+- Eight implemented calculation functions, including standalone Semantic Dispersion and the
+  composite ChunkScore, plus two planned metric placeholders.
 - Thirteen public preparation helpers: six local and seven API-based helpers for the implemented
   model-backed steps. The roadmap above identifies the remaining preparation work needed for
   complete end-to-end pipelines.
@@ -166,7 +166,7 @@ print(scores_by_chunk)
 
 Model helpers may download their default Hugging Face models on first use. The
 [practical usage guide](docs/usage-examples.md) covers model selection, API configuration, every
-callable, custom prompts, and complete SC/ICC/DCC/BC/HOPE pipelines.
+callable, custom prompts, and complete SC/ICC/DCC/BC/ChunkScore/HOPE pipelines.
 
 ## Public API
 
@@ -187,7 +187,8 @@ from chunking_metrics import metrics, preparations, prompts
 | `contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float` | Chunk-to-mean-context similarity |
 | `coreference_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
 | `boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> list[float]` | Conditioned/unconditioned perplexity ratio for each boundary |
-| `chunk_score(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
+| `semantic_dispersion(chunk_embs: np.ndarray, alpha: float = 1e-3) -> float` | Regularized log-determinant of the centered chunk-embedding Gram matrix |
+| `chunk_score(logical_independence: float, semantic_dispersion: float, logical_independence_weight: float = 0.3) -> float` | Weighted combination of precomputed LI and SD components |
 | `concept_unity(statements_embs: np.ndarray) -> float` | Mean clipped pairwise statement similarity |
 | `semantic_independence(standalone_answer_embs: np.ndarray, contextual_answer_embs: np.ndarray) -> float` | Mean clipped similarity of corresponding answers |
 

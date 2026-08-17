@@ -202,17 +202,100 @@ def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float
     return (cond_ppls / uncond_ppls[1:]).astype(float).tolist()
 
 
-def chunk_score(*args: Any, **kwargs: Any) -> None:
-    """ChunkScore is a reference-free composite metric
-    that combines two properties of a set of chunks:
-    Logical Independence (LI) — to what extent chunks are logically independent from each other;
-    Semantic Dispersion (SD) — how semantically diverse a set of chunks is
-    and does not consist of almost duplicate fragments.
-    General form:
-        ChunkScore = lambda * LI + (1 - lambda) * S * D
+def _finite_real_scalar(value: object) -> float | None:
+    """Convert a finite real scalar to ``float``, rejecting arrays and booleans."""
+    try:
+        value_array = np.asarray(value)
+    except (TypeError, ValueError):
+        return None
+
+    if (
+        value_array.ndim != 0
+        or not np.issubdtype(value_array.dtype, np.number)
+        or np.issubdtype(value_array.dtype, np.bool_)
+        or np.iscomplexobj(value_array)
+        or not np.isfinite(value_array)
+    ):
+        return None
+
+    return float(value_array)
+
+
+def semantic_dispersion(chunk_embs: np.ndarray, alpha: float = 1e-3) -> float:
+    """Evaluate semantic diversity across a set of chunks.
+
+    Args:
+        chunk_embs: Chunk embeddings with shape ``(chunks, embedding_dims)``.
+        alpha: Positive diagonal regularization applied to the centered Gram matrix.
+
+    Returns:
+        ``logdet(centered @ centered.T + alpha * I) / chunk_count``. Each chunk embedding
+        is centered across its features. Invalid inputs or non-finite intermediate values
+        produce ``0.0``; valid results are not clipped and may be negative.
     """
-    del args, kwargs
-    raise NotImplementedError("Not implemented yet")
+    regularization = _finite_real_scalar(alpha)
+    if (
+        not isinstance(chunk_embs, np.ndarray)
+        or chunk_embs.ndim != 2
+        or min(chunk_embs.shape) <= 0
+        or not np.issubdtype(chunk_embs.dtype, np.number)
+        or np.iscomplexobj(chunk_embs)
+        or not np.all(np.isfinite(chunk_embs))
+        or regularization is None
+        or regularization <= 0
+    ):
+        return 0.0
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        floating_embs = chunk_embs.astype(np.float64, copy=False)
+        centered_embs = floating_embs - np.mean(floating_embs, axis=1, keepdims=True)
+        gram_matrix = centered_embs @ centered_embs.T
+        regularized_gram = gram_matrix + regularization * np.eye(
+            chunk_embs.shape[0],
+            dtype=np.float64,
+        )
+
+    if not np.all(np.isfinite(regularized_gram)):
+        return 0.0
+
+    try:
+        sign, log_determinant = np.linalg.slogdet(regularized_gram)
+    except np.linalg.LinAlgError:
+        return 0.0
+
+    if sign <= 0 or not np.isfinite(log_determinant):
+        return 0.0
+
+    result = log_determinant / chunk_embs.shape[0]
+    return float(result) if np.isfinite(result) else 0.0
+
+
+def chunk_score(
+    logical_independence: float,
+    semantic_dispersion: float,
+    logical_independence_weight: float = 0.3,
+) -> float:
+    """Combine precomputed Logical Independence and Semantic Dispersion scores.
+
+    Args:
+        logical_independence: Precomputed scalar LI component, commonly the mean Boundary
+            Clarity score.
+        semantic_dispersion: Precomputed scalar SD component.
+        logical_independence_weight: LI weight in the inclusive range ``[0.0, 1.0]``.
+
+    Returns:
+        ``weight * LI + (1 - weight) * SD`` without clipping or normalization. Invalid
+        components, an invalid weight, or a non-finite result produce ``0.0``.
+    """
+    independence = _finite_real_scalar(logical_independence)
+    dispersion = _finite_real_scalar(semantic_dispersion)
+    weight = _finite_real_scalar(logical_independence_weight)
+    if independence is None or dispersion is None or weight is None or not 0.0 <= weight <= 1.0:
+        return 0.0
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        result = weight * independence + (1.0 - weight) * dispersion
+    return float(result) if np.isfinite(result) else 0.0
 
 
 def concept_unity(statements_embs: np.ndarray) -> float:

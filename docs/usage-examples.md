@@ -88,6 +88,28 @@ document_score = float(np.mean(scores_by_boundary))
 print(document_score)  # 0.7
 ```
 
+### Semantic Dispersion and ChunkScore
+
+`semantic_dispersion` accepts one embedding per chunk. It centers each row across its features
+and returns the regularized log-determinant score. The value is not clipped and may be negative.
+`chunk_score` combines already calculated scalar LI and SD components.
+
+```python
+import numpy as np
+
+from chunking_metrics.metrics import chunk_score, semantic_dispersion
+
+chunk_embeddings = np.array(
+    [
+        [1.0, -1.0, 0.0],
+        [1.0, 1.0, -2.0],
+    ]
+)
+sd = semantic_dispersion(chunk_embeddings, alpha=1e-3)
+score = chunk_score(logical_independence=0.8, semantic_dispersion=sd)
+print({"SD": sd, "ChunkScore": score})
+```
+
 ### HOPE Concept Unity
 
 Concept Unity expects the embeddings of factual statements generated from one chunk. The diagonal
@@ -525,6 +547,43 @@ bc = float(np.mean(bc_by_boundary))
 print({"SC": sc, "ICC": icc, "DCC": dcc, "BC": bc})
 ```
 
+### QChunker ChunkScore
+
+This pipeline embeds complete chunks for SD, averages Boundary Clarity into the LI scalar, and
+then combines the two precomputed components with the recommended LI weight of `0.3`.
+
+```python
+import numpy as np
+
+from chunking_metrics.metrics import boundary_clarity, chunk_score, semantic_dispersion
+from chunking_metrics.preparations import local
+
+chunks = [
+    "The archive opened in 2019 and stores historical maps.",
+    "A digitization project began in 2020 and covered 4,000 maps.",
+    "Researchers can search the catalog online.",
+]
+
+# embeddings -> Semantic Dispersion
+chunk_embeddings = local.calculate_embeddings(chunks, device="cpu")
+sd = semantic_dispersion(chunk_embeddings)
+
+# perplexities -> Boundary Clarity -> mean Logical Independence
+unconditional = np.array([local.calculate_perplexity(chunk, device="cpu") for chunk in chunks])
+conditional = np.array(
+    [
+        local.calculate_perplexity(current, context=previous, device="cpu")
+        for previous, current in zip(chunks, chunks[1:])
+    ]
+)
+li_by_boundary = boundary_clarity(unconditional, conditional)
+li = float(np.mean(li_by_boundary))
+
+# LI + SD -> ChunkScore
+score = chunk_score(li, sd)
+print({"LI": li, "SD": sd, "ChunkScore": score})
+```
+
 ### HOPE Concept Unity across a document
 
 `concept_unity` evaluates one statement matrix. Generate statements per chunk and average the
@@ -739,7 +798,7 @@ caller-side convention, not a call to a public aggregate API.
 
 ## Unimplemented metrics
 
-Block Integrity, Coreference Integrity, and ChunkScore are documented in the
+Block Integrity and Coreference Integrity are documented in the
 [metric reference](chunking_metrics.md), but their current functions are placeholders that raise
-`NotImplementedError`. HOPE Aggregate has no function at all. Do not include any of these in an
-automated pipeline until an implementation is added.
+`NotImplementedError`. HOPE Aggregate has no function at all. Do not include these unimplemented
+metrics in an automated pipeline until an implementation is added.

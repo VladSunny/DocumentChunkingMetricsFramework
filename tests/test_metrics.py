@@ -4,9 +4,11 @@ import pytest
 import chunking_metrics.metrics as metrics
 from chunking_metrics.metrics import (
     boundary_clarity,
+    chunk_score,
     concept_unity,
     contextual_coherence,
     intrachunk_cohesion,
+    semantic_dispersion,
     size_compliance,
 )
 
@@ -116,6 +118,119 @@ def test_boundary_clarity_returns_empty_list_for_invalid_inputs(
     cond_ppls: np.ndarray,
 ) -> None:
     assert boundary_clarity(uncond_ppls, cond_ppls) == []
+
+
+def test_semantic_dispersion_uses_regularized_centered_gram_matrix() -> None:
+    chunk_embs = np.array([[1.0, 3.0], [2.0, 0.0]])
+
+    result = semantic_dispersion(chunk_embs, alpha=0.5)
+
+    # Centering produces [-1, 1] and [1, -1], so det(Gram + 0.5 I) = 2.25.
+    assert result == pytest.approx(np.log(2.25) / 2)
+
+
+def test_semantic_dispersion_rewards_independent_embeddings_over_duplicates() -> None:
+    independent_embs = np.array([[1.0, -1.0, 0.0], [1.0, 1.0, -2.0]])
+    duplicate_embs = np.array([[1.0, -1.0, 0.0], [1.0, -1.0, 0.0]])
+
+    assert semantic_dispersion(independent_embs) > semantic_dispersion(duplicate_embs)
+
+
+def test_semantic_dispersion_increases_with_regularization() -> None:
+    chunk_embs = np.array([[1.0, 3.0], [2.0, 0.0]])
+
+    assert semantic_dispersion(chunk_embs, alpha=1.0) > semantic_dispersion(
+        chunk_embs,
+        alpha=0.1,
+    )
+
+
+def test_semantic_dispersion_supports_one_chunk() -> None:
+    assert semantic_dispersion(np.array([[1.0, 3.0]]), alpha=0.5) == pytest.approx(np.log(2.5))
+
+
+def test_semantic_dispersion_converts_integer_embeddings_before_centering() -> None:
+    chunk_embs = np.array([[1, 3], [2, 0]], dtype=np.int64)
+
+    assert semantic_dispersion(chunk_embs, alpha=0.5) == pytest.approx(np.log(2.25) / 2)
+
+
+def test_semantic_dispersion_returns_zero_when_gram_matrix_overflows() -> None:
+    chunk_embs = np.array([[1e308, -1e308], [-1e308, 1e308]])
+
+    assert semantic_dispersion(chunk_embs) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("chunk_embs", "alpha"),
+    [
+        (np.array([]), 1e-3),
+        (np.empty((0, 2)), 1e-3),
+        (np.empty((2, 0)), 1e-3),
+        (np.ones((1, 1, 1)), 1e-3),
+        (np.array([["not", "numeric"]]), 1e-3),
+        (np.array([[1.0 + 1.0j, 0.0]]), 1e-3),
+        (np.array([[np.nan, 0.0]]), 1e-3),
+        (np.array([[np.inf, 0.0]]), 1e-3),
+        ([[1.0, 0.0]], 1e-3),
+        (np.array([[1.0, 0.0]]), 0.0),
+        (np.array([[1.0, 0.0]]), -1.0),
+        (np.array([[1.0, 0.0]]), np.nan),
+        (np.array([[1.0, 0.0]]), np.inf),
+        (np.array([[1.0, 0.0]]), 1.0 + 0.0j),
+        (np.array([[1.0, 0.0]]), "0.1"),
+    ],
+)
+def test_semantic_dispersion_returns_zero_for_invalid_inputs(
+    chunk_embs: object,
+    alpha: object,
+) -> None:
+    assert semantic_dispersion(chunk_embs, alpha) == 0.0
+
+
+def test_chunk_score_uses_recommended_logical_independence_weight() -> None:
+    assert chunk_score(0.8, 0.2) == pytest.approx(0.38)
+
+
+@pytest.mark.parametrize(
+    ("weight", "expected"),
+    [
+        (0.0, -2.0),
+        (1.0, 0.8),
+    ],
+)
+def test_chunk_score_supports_boundary_weights(weight: float, expected: float) -> None:
+    assert chunk_score(0.8, -2.0, weight) == pytest.approx(expected)
+
+
+def test_chunk_score_preserves_negative_semantic_dispersion() -> None:
+    assert chunk_score(0.5, -1.0, 0.25) == pytest.approx(-0.625)
+
+
+@pytest.mark.parametrize(
+    ("logical_independence", "dispersion", "weight"),
+    [
+        ("0.8", 0.2, 0.3),
+        (0.8, "0.2", 0.3),
+        (0.8, 0.2, "0.3"),
+        (True, 0.2, 0.3),
+        (0.8, False, 0.3),
+        (0.8, 0.2, True),
+        (np.nan, 0.2, 0.3),
+        (0.8, np.inf, 0.3),
+        (0.8, 0.2, np.nan),
+        (0.8 + 0.0j, 0.2, 0.3),
+        (0.8, 0.2, -0.1),
+        (0.8, 0.2, 1.1),
+        (np.array([0.8]), 0.2, 0.3),
+    ],
+)
+def test_chunk_score_returns_zero_for_invalid_inputs(
+    logical_independence: object,
+    dispersion: object,
+    weight: object,
+) -> None:
+    assert chunk_score(logical_independence, dispersion, weight) == 0.0
 
 
 def test_concept_unity_averages_clipped_pairwise_similarities() -> None:
