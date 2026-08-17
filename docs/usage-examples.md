@@ -192,6 +192,33 @@ conditional = local.calculate_perplexity(
 print(unconditional, conditional)
 ```
 
+The API equivalent targets a causal LM served through vLLM's
+[OpenAI-compatible `/v1/completions` endpoint](https://docs.vllm.ai/en/v0.12.0/serving/openai_compatible_server/).
+The server must return echoed prompt `text_offset` and `token_logprobs` values; provider errors
+and context-window overflow are left to the caller.
+
+```python
+import os
+
+from chunking_metrics.preparations import api
+
+settings = {
+    "model_name": "Qwen/Qwen2.5-1.5B",
+    "api_key": os.environ["OPENAI_API_KEY"],
+    "base_url": "http://localhost:8000/v1",
+}
+unconditional = api.calculate_perplexity(
+    "The second chunk starts here.",
+    **settings,
+)
+conditional = api.calculate_perplexity(
+    "The second chunk starts here.",
+    context="The first chunk provides preceding context.",
+    **settings,
+)
+print(unconditional, conditional)
+```
+
 ### Retrieval
 
 Each query gets its own relevance-ranked list. If fewer than `top_k` candidates exist, all are

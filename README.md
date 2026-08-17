@@ -38,12 +38,12 @@ implemented. A checked preparation item means that a corresponding public helper
   - [x] Calculation
   - Perplexity/scoring
     - [x] Local
-    - [ ] API
+    - [x] API
 - [ChunkScore](docs/chunking_metrics.md#7-chunkscore)
   - [ ] Calculation
   - Perplexity
     - [x] Local
-    - [ ] API
+    - [x] API
   - Embeddings
     - [x] Local
     - [x] API
@@ -92,12 +92,12 @@ calculated by the caller.
 
 - Six implemented calculation functions for size, cohesion, context, boundaries, Concept Unity,
   and Semantic Independence, plus three planned metric placeholders.
-- Twelve public preparation helpers: six local and six API-based helpers for the implemented
+- Thirteen public preparation helpers: six local and seven API-based helpers for the implemented
   model-backed steps. The roadmap above identifies the remaining preparation work needed for
   complete end-to-end pipelines.
 - Ten public prompt constants, including system and user prompts for all generation workflows.
-- Local Hugging Face inference and provider-neutral OpenAI-compatible Chat Completions and
-  Embeddings helpers.
+- Local Hugging Face inference and provider-neutral OpenAI-compatible Chat Completions,
+  Completions, and Embeddings helpers.
 
 For formulas, assumptions, and planned metrics, see the
 [metric reference](docs/chunking_metrics.md). For one example of every implemented function and
@@ -209,12 +209,35 @@ from chunking_metrics import metrics, preparations, prompts
 
 | Signature | Purpose |
 | --- | --- |
+| `calculate_perplexity(text: str, model_name: str, api_key: str, base_url: str \| None = None, *, context: str \| None = None) -> float` | Calculate target perplexity through a vLLM OpenAI-compatible Completions endpoint |
 | `calculate_embeddings(texts: str \| Sequence[str], model_name: str, api_key: str, base_url: str \| None = None, *, dimensions: int \| None = None, batch_size: int = 2048) -> np.ndarray` | Encode one text or a sequence as unnormalized embeddings through an OpenAI-compatible API |
 | `generate_answers(questions: Sequence[str], chunk: str, model_name: str, api_key: str, base_url: str \| None = None, *, additional_chunks_by_question: Sequence[Sequence[str]] \| None = None, prompt: str = DEFAULT_ANSWER_PROMPT, temperature: float = 0.0, max_new_tokens: int = 128) -> list[str]` | Answer questions through an OpenAI-compatible API |
 | `generate_statements(chunk: str, model_name: str = "", api_key: str = "", base_url: str = "", *, prompt: str = DEFAULT_STATEMENT_PROMPT, statement_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256) -> list[str]` | Generate statements through an OpenAI-compatible API |
 | `generate_information_preservation_statements(segment: str, model_name: str = "", api_key: str = "", base_url: str \| None = None, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT, temperature: float = 0.7, max_new_tokens: int = 256) -> tuple[str, list[str]]` | Generate one true and three false statements |
 | `evaluate_information_preservation(true_statement: str, false_statements: Sequence[str], relevant_chunks: Sequence[str], model_name: str, api_key: str, base_url: str \| None = None, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT, temperature: float = 0.0, max_new_tokens: int = 32, seed: int \| None = None) -> int` | Score one retrieved multiple-choice test as `0` or `1` |
 | `generate_questions(chunk: str, model_name: str = "", api_key: str = "", base_url: str = "", *, prompt: str = DEFAULT_QUESTION_PROMPT, question_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256) -> list[str]` | Generate questions through an OpenAI-compatible API |
+
+For a causal LM served through vLLM's
+[OpenAI-compatible server](https://docs.vllm.ai/en/v0.12.0/serving/openai_compatible_server/)
+with echoed prompt log-probabilities enabled:
+
+```python
+import os
+
+from chunking_metrics.preparations import api
+
+settings = {
+    "model_name": "Qwen/Qwen2.5-1.5B",
+    "api_key": os.environ["OPENAI_API_KEY"],
+    "base_url": "http://localhost:8000/v1",
+}
+unconditional = api.calculate_perplexity("The next chunk starts here.", **settings)
+conditional = api.calculate_perplexity(
+    "The next chunk starts here.",
+    context="The preceding chunk supplies context.",
+    **settings,
+)
+```
 
 ### Prompts (`chunking_metrics.prompts`)
 
@@ -253,9 +276,10 @@ Values are serialized into prompts as JSON. Escape literal braces in a custom fo
   oldest context tokens when necessary but rejects a target that cannot fit.
 - Local statement and question generation require a tokenizer chat template. Generation helpers
   make no retries, and local prompts are not truncated.
-- API helpers use OpenAI-compatible Chat Completions and Embeddings endpoints. Supply an explicit
-  provider model and API key; set a base URL for non-OpenAI providers. Callers own provider errors,
-  retries, rate limits, and costs.
+- API helpers use OpenAI-compatible Chat Completions, Completions, and Embeddings endpoints.
+  API perplexity specifically targets vLLM and requires echoed prompt token log-probabilities.
+  Supply an explicit provider model and API key; set a base URL for non-OpenAI providers. Callers
+  own provider errors, retries, rate limits, context-window overflow, and costs.
 - Preparation helpers raise `TypeError` or `ValueError` for invalid inputs. Metric functions
   generally return `0.0` for invalid shapes or values that they explicitly validate.
 

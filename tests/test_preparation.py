@@ -107,6 +107,196 @@ def _api_embedding_response(
     )
 
 
+def _api_perplexity_response(
+    text_offsets: object,
+    token_logprobs: object,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                logprobs=SimpleNamespace(
+                    text_offset=text_offsets,
+                    token_logprobs=token_logprobs,
+                )
+            )
+        ]
+    )
+
+
+def test_api_calculate_perplexity_returns_unconditional_score_and_exact_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_arguments: list[dict[str, object]] = []
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return _api_perplexity_response(
+                [0, 0, 3, 7],
+                [None, -1.0, -3.0, -99.0],
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            client_arguments.append(kwargs)
+            self.completions = FakeCompletions()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    result = api.calculate_perplexity(
+        "  Привет",
+        model_name=" provider/qwen ",
+        api_key="secret",
+        base_url="http://localhost:8000/v1",
+    )
+
+    assert result == pytest.approx(math.exp(2.0))
+    assert client_arguments == [{"api_key": "secret", "base_url": "http://localhost:8000/v1"}]
+    assert calls == [
+        {
+            "model": "provider/qwen",
+            "prompt": " Привет",
+            "max_tokens": 1,
+            "echo": True,
+            "logprobs": 0,
+            "stream": False,
+        }
+    ]
+
+
+def test_api_calculate_perplexity_scores_only_normalized_conditional_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return _api_perplexity_response(
+                [0, 0, 8, 9, 13],
+                [None, -50.0, -math.log(2.0), -math.log(8.0), -100.0],
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.completions = FakeCompletions()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    result = api.calculate_perplexity(
+        "  цель",
+        "model",
+        "secret",
+        context="Контекст \t",
+    )
+
+    assert result == pytest.approx(4.0)
+    assert calls[0]["prompt"] == "Контекст цель"
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "error_type", "message"),
+    [
+        ("text", 1, TypeError, "text must be a string"),
+        ("text", " \t", ValueError, "text must not be empty"),
+        ("model_name", 1, TypeError, "model_name must be a string"),
+        ("model_name", " ", ValueError, "model_name must not be empty"),
+        ("api_key", 1, TypeError, "api_key must be a string"),
+        ("api_key", " ", ValueError, "api_key must not be empty"),
+        ("base_url", 1, TypeError, "base_url must be a string or None"),
+        ("base_url", " ", ValueError, "base_url must not be empty"),
+        ("context", 1, TypeError, "context must be a string or None"),
+        ("context", " \t", ValueError, "context must not be empty"),
+    ],
+)
+def test_api_calculate_perplexity_rejects_invalid_arguments_before_client(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        api,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    arguments: dict[str, object] = {
+        "text": "text",
+        "model_name": "model",
+        "api_key": "secret",
+        argument: value,
+    }
+
+    with pytest.raises(error_type, match=message):
+        api.calculate_perplexity(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        SimpleNamespace(),
+        SimpleNamespace(choices=[]),
+        SimpleNamespace(choices=[SimpleNamespace()]),
+        SimpleNamespace(choices=[SimpleNamespace(logprobs=None)]),
+        SimpleNamespace(choices=[SimpleNamespace(logprobs=SimpleNamespace(token_logprobs=[-1.0]))]),
+        SimpleNamespace(choices=[SimpleNamespace(logprobs=SimpleNamespace(text_offset=[0]))]),
+        _api_perplexity_response([0], [-1.0, -2.0]),
+        _api_perplexity_response([-1, 0, 5], [-1.0, -2.0, -3.0]),
+        _api_perplexity_response([0, 2, 1, 5], [-1.0, -2.0, -3.0, -4.0]),
+        _api_perplexity_response([0, 6], [-1.0, -2.0]),
+        _api_perplexity_response([0, 1.5, 5], [-1.0, -2.0, -3.0]),
+        _api_perplexity_response([0, 1, 5], [-1.0, None, -3.0]),
+        _api_perplexity_response([0, 1, 5], [-1.0, float("nan"), -3.0]),
+        _api_perplexity_response([0, 1, 5], [-1.0, float("inf"), -3.0]),
+        _api_perplexity_response([0, 1, 5], [-1.0, "bad", -3.0]),
+        _api_perplexity_response([0, 5], [None, -2.0]),
+    ],
+)
+def test_api_calculate_perplexity_rejects_malformed_response(
+    monkeypatch: pytest.MonkeyPatch,
+    response: SimpleNamespace,
+) -> None:
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return response
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.completions = FakeCompletions()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(ValueError, match="API response"):
+        api.calculate_perplexity("text", "model", "secret")
+
+
+def test_api_calculate_perplexity_propagates_provider_errors_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_error = RuntimeError("context window exceeded")
+    call_count = 0
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            nonlocal call_count
+            call_count += 1
+            raise provider_error
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.completions = FakeCompletions()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(RuntimeError) as raised:
+        api.calculate_perplexity("text", "model", "secret")
+
+    assert raised.value is provider_error
+    assert call_count == 1
+
+
 def test_api_calculate_embeddings_returns_single_float32_vector_and_exact_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
