@@ -13,7 +13,6 @@ implemented. A checked preparation item means that a corresponding public helper
 
 - [Size Compliance (SC)](docs/chunking_metrics.md#1-size-compliance-sc)
   - [x] Calculation
-  - [ ] Preparation: calculate chunk lengths
 - [Block Integrity (BI)](docs/chunking_metrics.md#2-block-integrity-bi)
   - [ ] Calculation
   - [ ] Preparation: extract structural spans
@@ -70,7 +69,7 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] Local
     - [x] API
 - [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
-  - [ ] Calculation
+  - [x] Calculation (aggregate results from `evaluate_information_preservation` by yourself)
   - [ ] Preparation: sample document segments
   - Statements
     - [x] Local
@@ -81,7 +80,7 @@ implemented. A checked preparation item means that a corresponding public helper
   - Evaluation
     - [x] Local
     - [x] API
-  - [ ] Preparation: aggregate evaluation results
+  - [ ] Preparation: aggregate evaluation results (you can do it by yourself)
 
 `block_integrity`, `coreference_integrity`, and `chunk_score` currently exist only as
 `NotImplementedError` placeholders. Information Preservation has API generation and evaluation
