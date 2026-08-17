@@ -151,6 +151,26 @@ many_embeddings = local.calculate_embeddings(
 print(one_embedding.shape, many_embeddings.shape)
 ```
 
+`api.calculate_embeddings` uses an OpenAI-compatible Embeddings endpoint. Its vectors are returned
+as provided by the service, without L2-normalization. Set `dimensions` only when the selected model
+and provider support shortening embeddings.
+
+```python
+import os
+
+from chunking_metrics.preparations import api
+
+embeddings = api.calculate_embeddings(
+    ["First sentence.", "Second sentence."],
+    model_name="provider/embedding-model",
+    api_key=os.environ["OPENAI_API_KEY"],
+    base_url="https://api.provider.example/v1",
+    dimensions=1024,
+    batch_size=128,
+)
+print(embeddings.shape)
+```
+
 ### Perplexity
 
 Only target tokens contribute to the loss when `context` is supplied.
@@ -175,7 +195,7 @@ print(unconditional, conditional)
 ### Retrieval
 
 Each query gets its own relevance-ranked list. If fewer than `top_k` candidates exist, all are
-returned.
+returned. Retrieval currently uses local embeddings; an API retrieval helper is not implemented.
 
 ```python
 from chunking_metrics.preparations import local

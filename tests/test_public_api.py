@@ -14,6 +14,7 @@ def test_public_api_is_grouped_by_module() -> None:
     assert chunking_metrics.preparations.local is local
     assert chunking_metrics.preparations.api is api
     assert local.calculate_embeddings is calculate_embeddings
+    assert callable(api.calculate_embeddings)
     assert chunking_metrics.prompts.DEFAULT_QUESTION_PROMPT is DEFAULT_QUESTION_PROMPT
     assert not hasattr(chunking_metrics, "size_compliance")
     assert not hasattr(chunking_metrics, "calculate_embeddings")

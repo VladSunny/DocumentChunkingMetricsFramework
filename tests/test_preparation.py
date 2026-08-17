@@ -93,6 +93,208 @@ class FakeEmbeddingModel:
         return np.array([[0.6, 0.8] for _ in texts], dtype=self.embedding_dtype)
 
 
+def _api_embedding_response(
+    items: list[tuple[int, list[float]]],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        data=[
+            SimpleNamespace(object="embedding", index=index, embedding=embedding)
+            for index, embedding in items
+        ],
+        model="provider/embedding-model",
+        object="list",
+        usage=SimpleNamespace(prompt_tokens=1, total_tokens=1),
+    )
+
+
+def test_api_calculate_embeddings_returns_single_float32_vector_and_exact_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_arguments: list[dict[str, object]] = []
+    calls: list[dict[str, object]] = []
+
+    class FakeEmbeddings:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return _api_embedding_response([(0, [1.5, -2.0])])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            client_arguments.append(kwargs)
+            self.embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    result = api.calculate_embeddings(
+        " Text. ",
+        model_name=" provider/embedding-model ",
+        api_key="secret",
+        base_url="https://example.test/v1",
+    )
+
+    np.testing.assert_array_equal(result, np.array([1.5, -2.0], dtype=np.float32))
+    assert result.shape == (2,)
+    assert result.dtype == np.float32
+    assert client_arguments == [{"api_key": "secret", "base_url": "https://example.test/v1"}]
+    assert calls == [
+        {
+            "model": "provider/embedding-model",
+            "input": [" Text. "],
+            "encoding_format": "float",
+        }
+    ]
+
+
+def test_api_calculate_embeddings_batches_and_restores_global_input_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    responses = iter(
+        [
+            _api_embedding_response([(1, [2.0, 20.0]), (0, [1.0, 10.0])]),
+            _api_embedding_response([(0, [3.0, 30.0])]),
+        ]
+    )
+
+    class FakeEmbeddings:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return next(responses)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    result = api.calculate_embeddings(
+        ["first", "second", "third"],
+        model_name="model",
+        api_key="secret",
+        dimensions=2,
+        batch_size=2,
+    )
+
+    np.testing.assert_array_equal(
+        result,
+        np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]], dtype=np.float32),
+    )
+    assert calls == [
+        {
+            "model": "model",
+            "input": ["first", "second"],
+            "encoding_format": "float",
+            "dimensions": 2,
+        },
+        {
+            "model": "model",
+            "input": ["third"],
+            "encoding_format": "float",
+            "dimensions": 2,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "error_type", "message"),
+    [
+        ("texts", 1, TypeError, "texts must be a string or a sequence of strings"),
+        ("texts", ["valid", 1], TypeError, r"texts\[1\] must be a string"),
+        ("texts", [], ValueError, "texts must not be empty"),
+        ("texts", ["  "], ValueError, r"texts\[0\] must not be empty"),
+        ("model_name", 1, TypeError, "model_name must be a string"),
+        ("model_name", "  ", ValueError, "model_name must not be empty"),
+        ("api_key", 1, TypeError, "api_key must be a string"),
+        ("api_key", "  ", ValueError, "api_key must not be empty"),
+        ("base_url", 1, TypeError, "base_url must be a string or None"),
+        ("base_url", "  ", ValueError, "base_url must not be empty"),
+        ("dimensions", 1.5, TypeError, "dimensions must be an integer or None"),
+        ("dimensions", True, TypeError, "dimensions must be an integer or None"),
+        ("dimensions", 0, ValueError, "dimensions must be greater than zero"),
+        ("batch_size", 1.5, TypeError, "batch_size must be an integer"),
+        ("batch_size", True, TypeError, "batch_size must be an integer"),
+        ("batch_size", 0, ValueError, "batch_size must be between 1 and 2048"),
+        ("batch_size", 2049, ValueError, "batch_size must be between 1 and 2048"),
+    ],
+)
+def test_api_calculate_embeddings_rejects_invalid_arguments_before_client(
+    monkeypatch: pytest.MonkeyPatch,
+    argument: str,
+    value: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        api,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    arguments: dict[str, object] = {
+        "texts": ["first", "second"],
+        "model_name": "model",
+        "api_key": "secret",
+        argument: value,
+    }
+
+    with pytest.raises(error_type, match=message):
+        api.calculate_embeddings(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("items", "message"),
+    [
+        ([(0, [1.0, 2.0])], "one embedding per input"),
+        ([(0, [1.0, 2.0]), (0, [3.0, 4.0])], "unique embedding index"),
+        ([(0, [1.0, 2.0]), (2, [3.0, 4.0])], "embedding indices from 0 to 1"),
+        ([(0, [1.0, 2.0]), (1, [3.0])], "same non-zero dimension"),
+        ([(0, []), (1, [])], "same non-zero dimension"),
+        ([(0, [1.0, float("nan")]), (1, [3.0, 4.0])], "finite numbers"),
+        ([(0, [1.0, float("inf")]), (1, [3.0, 4.0])], "finite numbers"),
+    ],
+)
+def test_api_calculate_embeddings_rejects_malformed_response(
+    monkeypatch: pytest.MonkeyPatch,
+    items: list[tuple[int, list[float]]],
+    message: str,
+) -> None:
+    class FakeEmbeddings:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return _api_embedding_response(items)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(ValueError, match=message):
+        api.calculate_embeddings(["first", "second"], "model", "secret")
+
+
+def test_api_calculate_embeddings_rejects_dimension_change_between_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(
+        [
+            _api_embedding_response([(0, [1.0, 2.0])]),
+            _api_embedding_response([(0, [3.0, 4.0, 5.0])]),
+        ]
+    )
+
+    class FakeEmbeddings:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return next(responses)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(api, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(ValueError, match="same dimension across batches"):
+        api.calculate_embeddings(["first", "second"], "model", "secret", batch_size=1)
+
+
 class FakeStatementTokenizer:
     eos_token_id = 2
     pad_token_id = 3

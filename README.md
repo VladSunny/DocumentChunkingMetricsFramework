@@ -22,13 +22,13 @@ implemented. A checked preparation item means that a corresponding public helper
   - [ ] Preparation: split chunks into sentences
   - Embeddings
     - [x] Local
-    - [ ] API
+    - [x] API
 - [Contextual Coherence (DCC)](docs/chunking_metrics.md#4-contextual-coherence-dcc)
   - [x] Calculation
   - [ ] Preparation: extract context windows
   - Embeddings
     - [x] Local
-    - [ ] API
+    - [x] API
 - [Coreference Integrity (RC)](docs/chunking_metrics.md#5-coreference-integrity-rc)
   - [ ] Calculation
   - Coreference resolution
@@ -46,7 +46,7 @@ implemented. A checked preparation item means that a corresponding public helper
     - [ ] API
   - Embeddings
     - [x] Local
-    - [ ] API
+    - [x] API
 - [HOPE Concept Unity](docs/chunking_metrics.md#8-hope-concept-unity)
   - [x] Calculation
   - Statements
@@ -54,7 +54,7 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] API
   - Embeddings
     - [x] Local
-    - [ ] API
+    - [x] API
 - [HOPE Semantic Independence](docs/chunking_metrics.md#9-hope-semantic-independence)
   - [x] Calculation
   - Questions
@@ -68,7 +68,7 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] API
   - Answer embeddings
     - [x] Local
-    - [ ] API
+    - [x] API
 - [HOPE Information Preservation](docs/chunking_metrics.md#10-hope-information-preservation)
   - [ ] Calculation
   - [ ] Preparation: sample document segments
@@ -92,11 +92,12 @@ calculated by the caller.
 
 - Six implemented calculation functions for size, cohesion, context, boundaries, Concept Unity,
   and Semantic Independence, plus three planned metric placeholders.
-- Eleven public preparation helpers: six local and five API-based helpers for the implemented
+- Twelve public preparation helpers: six local and six API-based helpers for the implemented
   model-backed steps. The roadmap above identifies the remaining preparation work needed for
   complete end-to-end pipelines.
 - Ten public prompt constants, including system and user prompts for all generation workflows.
-- Local Hugging Face inference and provider-neutral OpenAI-compatible Chat Completions helpers.
+- Local Hugging Face inference and provider-neutral OpenAI-compatible Chat Completions and
+  Embeddings helpers.
 
 For formulas, assumptions, and planned metrics, see the
 [metric reference](docs/chunking_metrics.md). For one example of every implemented function and
@@ -208,6 +209,7 @@ from chunking_metrics import metrics, preparations, prompts
 
 | Signature | Purpose |
 | --- | --- |
+| `calculate_embeddings(texts: str \| Sequence[str], model_name: str, api_key: str, base_url: str \| None = None, *, dimensions: int \| None = None, batch_size: int = 2048) -> np.ndarray` | Encode one text or a sequence as unnormalized embeddings through an OpenAI-compatible API |
 | `generate_answers(questions: Sequence[str], chunk: str, model_name: str, api_key: str, base_url: str \| None = None, *, additional_chunks_by_question: Sequence[Sequence[str]] \| None = None, prompt: str = DEFAULT_ANSWER_PROMPT, temperature: float = 0.0, max_new_tokens: int = 128) -> list[str]` | Answer questions through an OpenAI-compatible API |
 | `generate_statements(chunk: str, model_name: str = "", api_key: str = "", base_url: str = "", *, prompt: str = DEFAULT_STATEMENT_PROMPT, statement_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256) -> list[str]` | Generate statements through an OpenAI-compatible API |
 | `generate_information_preservation_statements(segment: str, model_name: str = "", api_key: str = "", base_url: str \| None = None, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT, temperature: float = 0.7, max_new_tokens: int = 256) -> tuple[str, list[str]]` | Generate one true and three false statements |
@@ -251,8 +253,9 @@ Values are serialized into prompts as JSON. Escape literal braces in a custom fo
   oldest context tokens when necessary but rejects a target that cannot fit.
 - Local statement and question generation require a tokenizer chat template. Generation helpers
   make no retries, and local prompts are not truncated.
-- API helpers use OpenAI-compatible Chat Completions. Supply an explicit provider model, API key,
-  and base URL; callers own provider errors, retries, rate limits, and costs.
+- API helpers use OpenAI-compatible Chat Completions and Embeddings endpoints. Supply an explicit
+  provider model and API key; set a base URL for non-OpenAI providers. Callers own provider errors,
+  retries, rate limits, and costs.
 - Preparation helpers raise `TypeError` or `ValueError` for invalid inputs. Metric functions
   generally return `0.0` for invalid shapes or values that they explicitly validate.
 
