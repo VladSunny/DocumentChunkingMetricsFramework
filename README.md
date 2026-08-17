@@ -73,13 +73,13 @@ implemented. A checked preparation item means that a corresponding public helper
   - [ ] Calculation
   - [ ] Preparation: sample document segments
   - Statements
-    - [ ] Local
+    - [x] Local
     - [x] API
   - Retrieval
     - [x] Local
     - [ ] API
   - Evaluation
-    - [ ] Local
+    - [x] Local
     - [x] API
   - [ ] Preparation: aggregate evaluation results
 
@@ -203,6 +203,8 @@ from chunking_metrics import metrics, preparations, prompts
 | `retrieve_relevant_chunks(queries: Sequence[str], candidate_chunks: Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, top_k: int = 3, device: str \| None = None, batch_size: int = 32) -> list[list[str]]` | Rank candidate chunks independently for each query |
 | `generate_answers(questions: Sequence[str], chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, additional_chunks_by_question: Sequence[Sequence[str]] \| None = None, prompt: str = DEFAULT_ANSWER_PROMPT, temperature: float = 0.0, max_new_tokens: int = 128, device: str \| None = None) -> list[str]` | Answer questions with a local causal chat model |
 | `generate_statements(chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_STATEMENT_PROMPT, statement_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None) -> list[str]` | Generate statements with a local causal chat model |
+| `generate_information_preservation_statements(segment: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None) -> tuple[str, list[str]]` | Generate one true and three false statements with a local causal chat model |
+| `evaluate_information_preservation(true_statement: str, false_statements: Sequence[str], relevant_chunks: Sequence[str], model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT, temperature: float = 0.0, max_new_tokens: int = 32, seed: int \| None = None, device: str \| None = None) -> int` | Score one retrieved multiple-choice test locally as `0` or `1` |
 | `generate_questions(chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_QUESTION_PROMPT, question_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None) -> list[str]` | Generate questions with a local causal chat model |
 
 #### API helpers (`chunking_metrics.preparations.api`)

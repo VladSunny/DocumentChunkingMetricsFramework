@@ -307,11 +307,9 @@ def _validate_statement_arguments(
         raise ValueError("max_new_tokens must be greater than zero")
 
 
-def _validate_information_preservation_arguments(
+def _validate_information_preservation_common_arguments(
     segment: str,
     model_name: str,
-    api_key: str,
-    base_url: str | None,
     prompt: str,
     temperature: float,
     max_new_tokens: int,
@@ -320,10 +318,6 @@ def _validate_information_preservation_arguments(
         raise TypeError("segment must be a string")
     if not isinstance(model_name, str):
         raise TypeError("model_name must be a string")
-    if not isinstance(api_key, str):
-        raise TypeError("api_key must be a string")
-    if base_url is not None and not isinstance(base_url, str):
-        raise TypeError("base_url must be a string or None")
     if not isinstance(prompt, str):
         raise TypeError("prompt must be a string")
     if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
@@ -334,10 +328,6 @@ def _validate_information_preservation_arguments(
         raise ValueError("segment must not be empty")
     if not model_name.strip():
         raise ValueError("model_name must not be empty")
-    if not api_key.strip():
-        raise ValueError("api_key must not be empty")
-    if base_url is not None and not base_url.strip():
-        raise ValueError("base_url must not be empty")
     if not prompt.strip():
         raise ValueError("prompt must not be empty")
     try:
@@ -362,13 +352,56 @@ def _validate_information_preservation_arguments(
         raise ValueError("max_new_tokens must be greater than zero")
 
 
-def _validate_information_preservation_evaluation_arguments(
+def _validate_information_preservation_arguments(
+    segment: str,
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+) -> None:
+    if not isinstance(api_key, str):
+        raise TypeError("api_key must be a string")
+    if base_url is not None and not isinstance(base_url, str):
+        raise TypeError("base_url must be a string or None")
+    _validate_information_preservation_common_arguments(
+        segment,
+        model_name,
+        prompt,
+        temperature,
+        max_new_tokens,
+    )
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if base_url is not None and not base_url.strip():
+        raise ValueError("base_url must not be empty")
+
+
+def _validate_local_information_preservation_arguments(
+    segment: str,
+    model_name: str,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+    device: str | None,
+) -> None:
+    if device is not None and not isinstance(device, str):
+        raise TypeError("device must be a string or None")
+    _validate_information_preservation_common_arguments(
+        segment,
+        model_name,
+        prompt,
+        temperature,
+        max_new_tokens,
+    )
+
+
+def _validate_information_preservation_evaluation_common_arguments(
     true_statement: str,
     false_statements: Sequence[str],
     relevant_chunks: Sequence[str],
     model_name: str,
-    api_key: str,
-    base_url: str | None,
     prompt: str,
     temperature: float,
     max_new_tokens: int,
@@ -390,10 +423,6 @@ def _validate_information_preservation_evaluation_arguments(
             raise TypeError(f"relevant_chunks[{index}] must be a string")
     if not isinstance(model_name, str):
         raise TypeError("model_name must be a string")
-    if not isinstance(api_key, str):
-        raise TypeError("api_key must be a string")
-    if base_url is not None and not isinstance(base_url, str):
-        raise TypeError("base_url must be a string or None")
     if not isinstance(prompt, str):
         raise TypeError("prompt must be a string")
     if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
@@ -424,10 +453,6 @@ def _validate_information_preservation_evaluation_arguments(
     relevant_chunk_items = [chunk.strip() for chunk in relevant_chunk_items]
     if not model_name.strip():
         raise ValueError("model_name must not be empty")
-    if not api_key.strip():
-        raise ValueError("api_key must not be empty")
-    if base_url is not None and not base_url.strip():
-        raise ValueError("base_url must not be empty")
     if not prompt.strip():
         raise ValueError("prompt must not be empty")
     try:
@@ -452,6 +477,64 @@ def _validate_information_preservation_evaluation_arguments(
     if max_new_tokens <= 0:
         raise ValueError("max_new_tokens must be greater than zero")
     return true_statement_item, false_statement_items, relevant_chunk_items
+
+
+def _validate_information_preservation_evaluation_arguments(
+    true_statement: str,
+    false_statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+    seed: int | None,
+) -> tuple[str, list[str], list[str]]:
+    if not isinstance(api_key, str):
+        raise TypeError("api_key must be a string")
+    if base_url is not None and not isinstance(base_url, str):
+        raise TypeError("base_url must be a string or None")
+    validated_arguments = _validate_information_preservation_evaluation_common_arguments(
+        true_statement,
+        false_statements,
+        relevant_chunks,
+        model_name,
+        prompt,
+        temperature,
+        max_new_tokens,
+        seed,
+    )
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if base_url is not None and not base_url.strip():
+        raise ValueError("base_url must not be empty")
+    return validated_arguments
+
+
+def _validate_local_information_preservation_evaluation_arguments(
+    true_statement: str,
+    false_statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    model_name: str,
+    prompt: str,
+    temperature: float,
+    max_new_tokens: int,
+    seed: int | None,
+    device: str | None,
+) -> tuple[str, list[str], list[str]]:
+    if device is not None and not isinstance(device, str):
+        raise TypeError("device must be a string or None")
+    return _validate_information_preservation_evaluation_common_arguments(
+        true_statement,
+        false_statements,
+        relevant_chunks,
+        model_name,
+        prompt,
+        temperature,
+        max_new_tokens,
+        seed,
+    )
 
 
 def _validate_question_arguments(

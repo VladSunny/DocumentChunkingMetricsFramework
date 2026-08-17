@@ -673,14 +673,10 @@ Generate a multiple-choice test from each source segment, retrieve evidence usin
 statement, evaluate the choice against those chunks, and average the binary results.
 
 ```python
-import os
 from statistics import fmean
 
-from chunking_metrics.preparations import api, local
+from chunking_metrics.preparations import local
 
-api_key = os.environ["OPENAI_API_KEY"]
-model_name = "provider/model-name"
-base_url = "https://api.provider.example/v1"
 chunks = [
     "The archive opened in 2019. It stores historical maps.",
     "A digitization project began in 2020. Its first phase covered 4,000 maps.",
@@ -689,11 +685,9 @@ chunks = [
 
 test_scores = []
 for test_index, segment in enumerate(chunks):
-    true_statement, false_statements = api.generate_information_preservation_statements(
+    true_statement, false_statements = local.generate_information_preservation_statements(
         segment,
-        model_name=model_name,
-        api_key=api_key,
-        base_url=base_url,
+        device="cpu",
     )
     relevant_chunks = local.retrieve_relevant_chunks(
         [true_statement],
@@ -702,14 +696,12 @@ for test_index, segment in enumerate(chunks):
         device="cpu",
     )[0]
     test_scores.append(
-        api.evaluate_information_preservation(
+        local.evaluate_information_preservation(
             true_statement,
             false_statements,
             relevant_chunks,
-            model_name=model_name,
-            api_key=api_key,
-            base_url=base_url,
             seed=test_index,
+            device="cpu",
         )
     )
 
@@ -717,8 +709,8 @@ document_information_preservation = fmean(test_scores)
 print(document_information_preservation)
 ```
 
-Use multiple independently generated tests per document in a serious evaluation. If the API call
-fails, the helpers do not return a partial aggregate or retry automatically.
+Use multiple independently generated tests per document in a serious evaluation. The local
+generation helpers do not return a partial aggregate or retry automatically.
 
 ### Manual HOPE Aggregate
 

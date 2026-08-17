@@ -1022,6 +1022,328 @@ def test_generate_information_preservation_statements_returns_labeled_statements
     )
 
 
+def test_local_generate_information_preservation_statements_uses_local_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def generate_text(messages: list[dict[str, str]], model_name: str, **kwargs: object) -> str:
+        calls.append({"messages": messages, "model_name": model_name, **kwargs})
+        return (
+            '{"true_statement":" True. ","false_statements":[" False 1. ","False 2.","False 3."]}'
+        )
+
+    monkeypatch.setattr(local, "_generate_text", generate_text)
+
+    result = local.generate_information_preservation_statements(
+        "Three sentence segment.",
+        prompt="Source: {segment}",
+        temperature=0.2,
+        max_new_tokens=128,
+    )
+
+    assert result == ("True.", ["False 1.", "False 2.", "False 3."])
+    assert calls == [
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": prompts.DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
+                },
+                {"role": "user", "content": 'Source: "Three sentence segment."'},
+            ],
+            "model_name": local.DEFAULT_STATEMENT_MODEL,
+            "temperature": 0.2,
+            "max_new_tokens": 128,
+            "device": None,
+            "chat_template_error": "model tokenizer must define a chat template",
+            "context_window_error": (
+                "segment and generated response do not fit within the model context window"
+            ),
+        }
+    ]
+
+
+def test_local_evaluate_information_preservation_scores_and_preserves_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def generate_text(messages: list[dict[str, str]], model_name: str, **kwargs: object) -> str:
+        calls.append({"messages": messages, "model_name": model_name, **kwargs})
+        return '{"selected_index": 3}'
+
+    false_statements = ["False 1.", "False 2.", "False 3."]
+    relevant_chunks = ["Chunk one.", "Chunk two."]
+    monkeypatch.setattr(local, "_generate_text", generate_text)
+
+    result = local.evaluate_information_preservation(
+        "True.",
+        false_statements,
+        relevant_chunks,
+        prompt="Options: {statements}\nChunks: {relevant_chunks}",
+        temperature=0.2,
+        max_new_tokens=17,
+        seed=7,
+        device="cpu",
+    )
+
+    assert result == 1
+    assert false_statements == ["False 1.", "False 2.", "False 3."]
+    assert relevant_chunks == ["Chunk one.", "Chunk two."]
+    assert calls == [
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": prompts.DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        'Options: [{"index": 1, "statement": "False 3."}, '
+                        '{"index": 2, "statement": "False 1."}, '
+                        '{"index": 3, "statement": "True."}, '
+                        '{"index": 4, "statement": "False 2."}]\n'
+                        'Chunks: ["Chunk one.", "Chunk two."]'
+                    ),
+                },
+            ],
+            "model_name": local.DEFAULT_STATEMENT_MODEL,
+            "temperature": 0.2,
+            "max_new_tokens": 17,
+            "device": "cpu",
+            "chat_template_error": "model tokenizer must define a chat template",
+            "context_window_error": (
+                "statements, relevant chunks, and generated response do not fit within the "
+                "model context window"
+            ),
+        }
+    ]
+
+
+def test_local_evaluate_information_preservation_returns_zero_and_repeats_seeded_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_messages: list[str] = []
+
+    def generate_text(messages: list[dict[str, str]], *args: object, **kwargs: object) -> str:
+        user_messages.append(messages[-1]["content"])
+        return '{"selected_index": 1}'
+
+    monkeypatch.setattr(local, "_generate_text", generate_text)
+    arguments = {
+        "true_statement": "True.",
+        "false_statements": ["False 1.", "False 2.", "False 3."],
+        "relevant_chunks": ["Relevant chunk."],
+        "seed": 7,
+    }
+
+    first_result = local.evaluate_information_preservation(**arguments)
+    second_result = local.evaluate_information_preservation(**arguments)
+
+    assert first_result == second_result == 0
+    assert user_messages[0] == user_messages[1]
+
+
+@pytest.mark.parametrize(
+    ("function_name", "arguments", "error_type", "message"),
+    [
+        (
+            "generate_information_preservation_statements",
+            {"segment": 1},
+            TypeError,
+            "segment must be a string",
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment.", "device": 1},
+            TypeError,
+            "device must be a string or None",
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "  "},
+            ValueError,
+            "segment must not be empty",
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment.", "prompt": "No placeholder."},
+            ValueError,
+            r"prompt must contain \{segment\}",
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment.", "temperature": 0},
+            ValueError,
+            "temperature must be greater than zero",
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment.", "max_new_tokens": 0},
+            ValueError,
+            "max_new_tokens must be greater than zero",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F1.", "F3."],
+                "relevant_chunks": ["Chunk."],
+            },
+            ValueError,
+            "false_statements must be distinct",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": [],
+            },
+            ValueError,
+            "relevant_chunks must not be empty",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+                "prompt": "Only {statements}.",
+            },
+            ValueError,
+            r"prompt must contain \{statements\} and \{relevant_chunks\}",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+                "temperature": -0.1,
+            },
+            ValueError,
+            "temperature must be greater than or equal to zero",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+                "device": 1,
+            },
+            TypeError,
+            "device must be a string or None",
+        ),
+    ],
+)
+def test_local_information_preservation_rejects_invalid_arguments_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        local,
+        "_generate_text",
+        lambda *args, **kwargs: pytest.fail("generation must not start"),
+    )
+
+    with pytest.raises(error_type, match=message):
+        getattr(local, function_name)(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("function_name", "arguments", "response", "message"),
+    [
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment."},
+            "not JSON",
+            "model response must be a JSON object with one non-empty true_statement",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+            },
+            '{"selected_index": 5}',
+            "model response must be a JSON object containing only selected_index from 1 to 4",
+        ),
+    ],
+)
+def test_local_information_preservation_rejects_invalid_json_response(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+    response: str,
+    message: str,
+) -> None:
+    monkeypatch.setattr(local, "_generate_text", lambda *args, **kwargs: response)
+
+    with pytest.raises(ValueError, match=message):
+        getattr(local, function_name)(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("function_name", "arguments", "template_error", "context_error"),
+    [
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment."},
+            "model tokenizer must define a chat template",
+            "segment and generated response do not fit within the model context window",
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+            },
+            "model tokenizer must define a chat template",
+            (
+                "statements, relevant chunks, and generated response do not fit within the "
+                "model context window"
+            ),
+        ),
+    ],
+)
+def test_local_information_preservation_reports_pipeline_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+    template_error: str,
+    context_error: str,
+) -> None:
+    tokenizer = FakeStatementTokenizer("unused")
+    tokenizer.apply_chat_template = (  # type: ignore[method-assign]
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("missing template"))
+    )
+    monkeypatch.setattr(
+        local,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, FakeStatementModel(), 32),
+    )
+    with pytest.raises(ValueError, match=template_error):
+        getattr(local, function_name)(**arguments)
+
+    tokenizer = FakeStatementTokenizer("unused")
+    monkeypatch.setattr(
+        local,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: (tokenizer, FakeStatementModel(), 5),
+    )
+    with pytest.raises(ValueError, match=context_error):
+        getattr(local, function_name)(**arguments)
+
+
 @pytest.mark.parametrize(
     "response",
     [
