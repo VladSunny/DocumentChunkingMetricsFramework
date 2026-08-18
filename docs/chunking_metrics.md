@@ -18,7 +18,7 @@
 | **Block Integrity (BI)** | сохранение структурных блоков документа | структурные spans + границы чанков | нет | структурная |
 | **Intrachunk Cohesion (ICC)** | семантическую однородность внутри чанка | sentence embeddings | нет | intrinsic semantic |
 | **Contextual Coherence (DCC)** | согласованность чанка с локальным контекстом | chunk/context embeddings | нет | contextual semantic |
-| **Coreference Integrity (RC)** | разрывы coreference-связей границами чанков | coreference chains + границы | нет | dependency-based |
+| **Coreference Integrity (RC)** | разрывы coreference-связей границами чанков | entity-pronoun spans + границы | нет | dependency-based |
 | **Boundary Clarity (BC)** | независимость соседних чанков | causal LM, perplexity | нет | boundary / independence |
 | **ChunkScore** | logical independence и semantic dispersion | causal LM + embeddings | нет | composite |
 | **HOPE Concept Unity** | единство концептов внутри чанка | LLM + embeddings | да | intrinsic semantic |
@@ -266,7 +266,7 @@ Chunk 2:
 
 Coreference resolver строит цепочки упоминаний одной сущности, после чего можно проверить, какие связи проходят через границы чанков.
 
-## Возможная формула
+## Формула
 
 Пусть $N_{relations}$ — число рассматриваемых coreference-связей, а $N_{broken}$ — число связей, у которых связанные mentions оказались в разных чанках. Тогда
 

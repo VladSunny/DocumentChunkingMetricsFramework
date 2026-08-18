@@ -138,27 +138,59 @@ def contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> fl
     return float(similarity)
 
 
-def coreference_integrity(*args: Any, **kwargs: Any) -> None:
-    """Not implemented yet
-    Coreference Integrity measures how much the boundaries of chunks
-    break the relationship between expressions that refer to the same entity.
+def coreference_integrity(
+    entity_pronoun_spans: Iterable[tuple[int, int]],
+    chunk_boundaries: Iterable[int],
+) -> float:
+    """Evaluate whether chunk boundaries preserve coreference relations.
 
-    For example:
+    Args:
+        entity_pronoun_spans: One ``(entity_start, pronoun_end)`` pair per relation, using
+            character offsets in the source document.
+        chunk_boundaries: Character offsets of the internal chunk boundaries.
 
-    Chunk 1:
-    Ivan handed over the contract to Peter.
-
-    Chunk 2:
-    He signed it the next day.
-
-    In the second chunk, the pronouns "he" and "his" require information from the first.
-    If only the second chunk is found during retrieval, its interpretation will become ambiguous.
-
-    Coreference resolver builds chains of mentions of a single entity,
-    after which you can check which connections pass through the boundaries of chunks.
+    Returns:
+        The fraction of relations not crossed by a chunk boundary. A relation is broken when
+        ``entity_start < boundary <= pronoun_end``. Inputs without relations or internal
+        boundaries produce ``1.0``. Malformed pairs, non-integer or negative offsets, and
+        otherwise invalid inputs produce ``0.0``.
     """
-    del args, kwargs
-    raise NotImplementedError("Not implemented yet")
+    try:
+        spans = list(entity_pronoun_spans)
+        boundaries = list(chunk_boundaries)
+    except (TypeError, ValueError):
+        return 0.0
+
+    def is_valid_offset(value: object) -> bool:
+        return (
+            isinstance(value, (int, np.integer))
+            and not isinstance(value, (bool, np.bool_))
+            and value >= 0
+        )
+
+    normalized_spans: list[tuple[int, int]] = []
+    for span in spans:
+        try:
+            entity_start, pronoun_end = span
+        except (TypeError, ValueError):
+            return 0.0
+
+        if (
+            not is_valid_offset(entity_start)
+            or not is_valid_offset(pronoun_end)
+            or entity_start >= pronoun_end
+        ):
+            return 0.0
+        normalized_spans.append((int(entity_start), int(pronoun_end)))
+
+    if not all(is_valid_offset(boundary) for boundary in boundaries):
+        return 0.0
+
+    broken_relations = sum(
+        any(entity_start < boundary <= pronoun_end for boundary in boundaries)
+        for entity_start, pronoun_end in normalized_spans
+    )
+    return 1.0 - broken_relations / max(1, len(normalized_spans))
 
 
 def boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> list[float]:

@@ -7,6 +7,7 @@ from chunking_metrics.metrics import (
     chunk_score,
     concept_unity,
     contextual_coherence,
+    coreference_integrity,
     intrachunk_cohesion,
     semantic_dispersion,
     size_compliance,
@@ -90,6 +91,74 @@ def test_contextual_coherence() -> None:
     context_embs = np.array([[1.0, 0.0], [0.0, 1.0]])
     result = contextual_coherence(chunk_embs, context_embs)
     assert result == pytest.approx(1 / np.sqrt(2))
+
+
+def test_coreference_integrity_returns_fraction_of_intact_relations() -> None:
+    entity_pronoun_spans = [(2, 8), (12, 18), (22, 28)]
+    chunk_boundaries = [10, 15]
+
+    assert coreference_integrity(entity_pronoun_spans, chunk_boundaries) == pytest.approx(2 / 3)
+
+
+@pytest.mark.parametrize(
+    ("chunk_boundary", "expected"),
+    [
+        (10, 1.0),
+        (20, 0.0),
+    ],
+)
+def test_coreference_integrity_uses_paper_boundary_interval(
+    chunk_boundary: int,
+    expected: float,
+) -> None:
+    assert coreference_integrity([(10, 20)], [chunk_boundary]) == expected
+
+
+@pytest.mark.parametrize(
+    ("entity_pronoun_spans", "chunk_boundaries"),
+    [
+        ([], [10]),
+        ([(2, 8)], []),
+    ],
+)
+def test_coreference_integrity_returns_one_when_nothing_can_be_broken(
+    entity_pronoun_spans: list[tuple[int, int]],
+    chunk_boundaries: list[int],
+) -> None:
+    assert coreference_integrity(entity_pronoun_spans, chunk_boundaries) == 1.0
+
+
+def test_coreference_integrity_materializes_generator_inputs() -> None:
+    entity_pronoun_spans = (span for span in [(2, 8), (12, 18)])
+    chunk_boundaries = (boundary for boundary in [10, 15])
+
+    assert coreference_integrity(entity_pronoun_spans, chunk_boundaries) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("entity_pronoun_spans", "chunk_boundaries"),
+    [
+        ([(2.5, 8)], [10]),
+        ([(-1, 8)], [10]),
+        ([(8, 8)], [10]),
+        ([(8, 2)], [10]),
+        ([(2, 8, 9)], [10]),
+        ([(True, 8)], [10]),
+        ([(2, np.nan)], [10]),
+        ([(2, 8)], [10.5]),
+        ([(2, 8)], [-1]),
+        ([(2, 8)], [True]),
+        ([(2, 8)], [np.nan]),
+        ([(2, 8)], [[10]]),
+        (None, [10]),
+        ([(2, 8)], None),
+    ],
+)
+def test_coreference_integrity_returns_zero_for_invalid_inputs(
+    entity_pronoun_spans: object,
+    chunk_boundaries: object,
+) -> None:
+    assert coreference_integrity(entity_pronoun_spans, chunk_boundaries) == 0.0
 
 
 def test_boundary_clarity() -> None:

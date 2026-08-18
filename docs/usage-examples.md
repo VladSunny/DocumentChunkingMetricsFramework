@@ -68,6 +68,21 @@ score = contextual_coherence(chunk_embedding, context_embeddings)
 print(score)
 ```
 
+### Coreference Integrity
+
+Pass entity-pronoun pairs already extracted by an external coreference resolver. Each pair stores
+the entity start and pronoun end as character offsets in the source document; chunk boundaries use
+the same coordinate system.
+
+```python
+from chunking_metrics.metrics import coreference_integrity
+
+entity_pronoun_spans = [(2, 8), (12, 18), (22, 28)]
+internal_chunk_boundaries = [10, 15]
+score = coreference_integrity(entity_pronoun_spans, internal_chunk_boundaries)
+print(score)  # 0.6666666666666667
+```
+
 ### Boundary Clarity
 
 For `K` chunks, pass `K` unconditional perplexities and `K - 1` perplexities in which each chunk
@@ -798,7 +813,8 @@ caller-side convention, not a call to a public aggregate API.
 
 ## Unimplemented metrics
 
-Block Integrity and Coreference Integrity are documented in the
-[metric reference](chunking_metrics.md), but their current functions are placeholders that raise
-`NotImplementedError`. HOPE Aggregate has no function at all. Do not include these unimplemented
-metrics in an automated pipeline until an implementation is added.
+Block Integrity is documented in the [metric reference](chunking_metrics.md), but its current
+function is a placeholder that raises `NotImplementedError`. Coreference Integrity calculation is
+implemented, but input preparation through a coreference resolver is not. HOPE Aggregate has no
+function at all. Do not include the unimplemented pieces in an automated pipeline until their
+implementations are added.

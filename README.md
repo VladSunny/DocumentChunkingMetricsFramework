@@ -29,7 +29,7 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] Local
     - [x] API
 - [Coreference Integrity (RC)](docs/chunking_metrics.md#5-coreference-integrity-rc)
-  - [ ] Calculation
+  - [x] Calculation
   - Coreference resolution
     - [ ] Local
     - [ ] API
@@ -82,15 +82,16 @@ implemented. A checked preparation item means that a corresponding public helper
     - [x] API
   - [ ] Preparation: aggregate evaluation results (you can do it by yourself)
 
-`block_integrity` and `coreference_integrity` currently exist only as `NotImplementedError`
-placeholders. Information Preservation has API generation and evaluation helpers, but no
-calculation function or complete preparation pipeline. HOPE Aggregate must also be calculated by
-the caller.
+`block_integrity` currently exists only as a `NotImplementedError` placeholder. Coreference
+Integrity accepts entity-pronoun spans prepared by an external resolver; no corresponding
+preparation helper is implemented. Information Preservation has API generation and evaluation
+helpers, but no calculation function or complete preparation pipeline. HOPE Aggregate must also
+be calculated by the caller.
 
 ## Features
 
-- Eight implemented calculation functions, including standalone Semantic Dispersion and the
-  composite ChunkScore, plus two planned metric placeholders.
+- Nine implemented calculation functions, including Coreference Integrity, standalone Semantic
+  Dispersion, and the composite ChunkScore, plus one planned metric placeholder.
 - Thirteen public preparation helpers: six local and seven API-based helpers for the implemented
   model-backed steps. The roadmap above identifies the remaining preparation work needed for
   complete end-to-end pipelines.
@@ -185,7 +186,7 @@ from chunking_metrics import metrics, preparations, prompts
 | `block_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
 | `intrachunk_cohesion(embs: Iterable[np.ndarray]) -> list[float]` | Sentence-to-centroid similarity for each chunk |
 | `contextual_coherence(chunk_embs: np.ndarray, context_embs: np.ndarray) -> float` | Chunk-to-mean-context similarity |
-| `coreference_integrity(*args: Any, **kwargs: Any) -> None` | Placeholder; raises `NotImplementedError` |
+| `coreference_integrity(entity_pronoun_spans: Iterable[tuple[int, int]], chunk_boundaries: Iterable[int]) -> float` | Fraction of entity-pronoun relations preserved within chunks |
 | `boundary_clarity(uncond_ppls: np.ndarray[float], cond_ppls: np.ndarray[float]) -> list[float]` | Conditioned/unconditioned perplexity ratio for each boundary |
 | `semantic_dispersion(chunk_embs: np.ndarray, alpha: float = 1e-3) -> float` | Regularized log-determinant of the centered chunk-embedding Gram matrix |
 | `chunk_score(logical_independence: float, semantic_dispersion: float, logical_independence_weight: float = 0.3) -> float` | Weighted combination of precomputed LI and SD components |
