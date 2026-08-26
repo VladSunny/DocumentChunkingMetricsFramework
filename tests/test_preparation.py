@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
+from pydantic import ValidationError
 
 import chunking_metrics.prompts as prompts
 from chunking_metrics.preparations import api, local
@@ -2319,6 +2320,276 @@ def test_generate_answers_rejects_invalid_client_arguments_before_creating_clien
 
     with pytest.raises(error_type, match=message):
         api.generate_answers(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("invalid_value", [-1, True, 1.5])
+@pytest.mark.parametrize(
+    ("function_name", "arguments"),
+    [
+        (
+            "generate_answers",
+            {"questions": ["Question?"], "chunk": "Chunk.", "model_name": "model"},
+        ),
+        ("generate_statements", {"chunk": "Chunk.", "model_name": "model"}),
+        ("generate_questions", {"chunk": "Chunk.", "model_name": "model"}),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment.", "model_name": "model"},
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+                "model_name": "model",
+            },
+        ),
+    ],
+)
+def test_local_generation_rejects_invalid_max_regenerations_before_loading_model(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+    invalid_value: object,
+) -> None:
+    monkeypatch.setattr(
+        local_generation,
+        "_load_model_and_tokenizer",
+        lambda model_name, device: pytest.fail("model must not be loaded"),
+    )
+    error_type = TypeError if isinstance(invalid_value, (bool, float)) else ValueError
+
+    with pytest.raises(error_type, match="max_regenerations"):
+        getattr(local, function_name)(**arguments, max_regenerations=invalid_value)
+
+
+@pytest.mark.parametrize("invalid_value", [-1, True, 1.5])
+@pytest.mark.parametrize(
+    ("function_name", "arguments"),
+    [
+        (
+            "generate_answers",
+            {
+                "questions": ["Question?"],
+                "chunk": "Chunk.",
+                "model_name": "model",
+                "api_key": "secret",
+            },
+        ),
+        (
+            "generate_statements",
+            {"chunk": "Chunk.", "model_name": "model", "api_key": "secret"},
+        ),
+        (
+            "generate_questions",
+            {"chunk": "Chunk.", "model_name": "model", "api_key": "secret"},
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Segment.", "model_name": "model", "api_key": "secret"},
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["F1.", "F2.", "F3."],
+                "relevant_chunks": ["Chunk."],
+                "model_name": "model",
+                "api_key": "secret",
+            },
+        ),
+    ],
+)
+def test_api_generation_rejects_invalid_max_regenerations_before_creating_client(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+    invalid_value: object,
+) -> None:
+    monkeypatch.setattr(
+        api_generation,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+    error_type = TypeError if isinstance(invalid_value, (bool, float)) else ValueError
+
+    with pytest.raises(error_type, match="max_regenerations"):
+        getattr(api, function_name)(**arguments, max_regenerations=invalid_value)
+
+
+def test_api_generate_statements_regenerates_from_only_latest_invalid_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(["not JSON", '[" First. ", "Second."]'])
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(api_generation, "OpenAI", FakeOpenAI)
+
+    result = api.generate_statements(
+        "Chunk.",
+        model_name="model",
+        api_key="secret",
+        statement_count=2,
+        max_regenerations=1,
+    )
+
+    assert result == ["First.", "Second."]
+    assert len(calls) == 2
+    original_messages = calls[0]["messages"]
+    retry_messages = calls[1]["messages"]
+    assert retry_messages[:-2] == original_messages  # type: ignore[index]
+    assert retry_messages[-2] == {"role": "assistant", "content": "not JSON"}  # type: ignore[index]
+    assert "exactly 2 non-empty strings" in retry_messages[-1]["content"]  # type: ignore[index]
+
+
+def test_local_generate_questions_exhausts_regenerations_and_chains_last_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(["not JSON", '["Only one?"]', '["First?", 2]'])
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages: list[dict[str, str]], *args: object, **kwargs: object) -> str:
+        calls.append(messages)
+        return next(responses)
+
+    monkeypatch.setattr(local_generation, "_generate_text", generate)
+
+    with pytest.raises(ValueError, match="exactly 2 non-empty strings") as raised:
+        local.generate_questions(
+            "Chunk.", model_name="model", question_count=2, max_regenerations=2
+        )
+
+    assert len(calls) == 3
+    assert len(calls[1]) == len(calls[0]) + 2
+    assert calls[1][-2]["content"] == "not JSON"
+    assert calls[2][:-2] == calls[0]
+    assert calls[2][-2]["content"] == '["Only one?"]'
+    assert isinstance(raised.value.__cause__, ValidationError)
+
+
+def test_api_generate_answers_applies_regeneration_limit_per_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter([" ", "Answer one.", "", " Answer two. "])
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(api_generation, "OpenAI", FakeOpenAI)
+
+    result = api.generate_answers(
+        ["First?", "Second?"],
+        "Chunk.",
+        model_name="model",
+        api_key="secret",
+        max_regenerations=1,
+    )
+
+    assert result == ["Answer one.", "Answer two."]
+    assert len(calls) == 4
+    assert len(calls[1]["messages"]) == 4  # type: ignore[arg-type]
+    assert len(calls[3]["messages"]) == 4  # type: ignore[arg-type]
+    assert '"First?"' in calls[1]["messages"][1]["content"]  # type: ignore[index]
+    assert '"Second?"' in calls[3]["messages"][1]["content"]  # type: ignore[index]
+
+
+def test_local_generate_answers_reports_exhausted_question_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(["Answer one.", "", " "])
+    monkeypatch.setattr(
+        local_generation,
+        "_generate_text",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    with pytest.raises(ValueError, match=r"answer for question 1 must not be empty") as raised:
+        local.generate_answers(
+            ["First?", "Second?"], "Chunk.", model_name="model", max_regenerations=1
+        )
+
+    assert isinstance(raised.value.__cause__, ValidationError)
+
+
+def test_api_evaluation_reuses_shuffled_options_when_regenerating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(['{"selected_index": 0}', '{"selected_index": 3}'])
+    calls: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(api_generation, "OpenAI", FakeOpenAI)
+
+    result = api.evaluate_information_preservation(
+        "True.",
+        ["F1.", "F2.", "F3."],
+        ["Chunk."],
+        model_name="model",
+        api_key="secret",
+        seed=7,
+        max_regenerations=1,
+    )
+
+    assert result == 1
+    assert len(calls) == 2
+    assert calls[1]["messages"][:2] == calls[0]["messages"]  # type: ignore[index]
+    assert calls[1]["messages"][-2]["content"] == '{"selected_index": 0}'  # type: ignore[index]
+
+
+def test_api_generation_does_not_regenerate_provider_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_error = RuntimeError("provider failed")
+    call_count = 0
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            nonlocal call_count
+            call_count += 1
+            raise provider_error
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(api_generation, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(RuntimeError) as raised:
+        api.generate_questions("Chunk.", model_name="model", api_key="secret", max_regenerations=3)
+
+    assert raised.value is provider_error
+    assert call_count == 1
 
 
 def test_calculate_embeddings_returns_vector_for_single_text(

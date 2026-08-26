@@ -70,6 +70,7 @@ def generate_answers(
     temperature: float = 0.0,
     max_new_tokens: int = 128,
     device: str | None = None,
+    max_regenerations: int = 0,
 ) -> list[str]:
     """Answer questions independently with a local causal chat model.
 
@@ -85,6 +86,7 @@ def generate_answers(
         temperature: Non-negative generation temperature. Zero selects greedy decoding.
         max_new_tokens: Maximum number of tokens generated for each answer.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override.
+        max_regenerations: Additional attempts allowed after an invalid model response.
 
     Returns:
         One stripped, non-empty answer per question, preserving question order.
@@ -94,9 +96,10 @@ def generate_answers(
         ValueError: If an argument is invalid, a prompt and response budget exceed the context
             window, the tokenizer has no chat template, or an answer is empty.
 
-    The model is loaded once, but each question is generated independently without truncation or
-    retries.
+    Each question is generated independently without truncation. The regeneration limit applies
+    separately to each question.
     """
+    utils._validate_max_regenerations(max_regenerations)
     question_items, additional_chunk_items = utils._validate_answer_arguments(
         questions,
         chunk,
@@ -111,19 +114,39 @@ def generate_answers(
     for index, (question, additional_chunks) in enumerate(
         zip(question_items, additional_chunk_items, strict=True)
     ):
-        messages = utils._answer_messages(question, chunk, additional_chunks, prompt)
-        response = _generate_text(
-            messages,
-            model_name,
-            temperature=temperature,
-            max_new_tokens=max_new_tokens,
-            device=device,
-            chat_template_error=f"question {index}: model tokenizer must define a chat template",
-            context_window_error=(
-                f"question {index} and generated answer do not fit within the model context window"
-            ),
+        original_messages = utils._answer_messages(question, chunk, additional_chunks, prompt)
+        chat_template_error = f"question {index}: model tokenizer must define a chat template"
+        context_window_error = (
+            f"question {index} and generated answer do not fit within the model context window"
         )
-        answers.append(utils._clean_answer(response, index))
+
+        def generate(
+            messages: list[dict[str, str]],
+            chat_template_error: str = chat_template_error,
+            context_window_error: str = context_window_error,
+        ) -> object:
+            return _generate_text(
+                messages,
+                model_name,
+                temperature=temperature,
+                max_new_tokens=max_new_tokens,
+                device=device,
+                chat_template_error=chat_template_error,
+                context_window_error=context_window_error,
+            )
+
+        answers.append(
+            utils._generate_with_validation(
+                original_messages,
+                generate,
+                lambda response, question_index=index: utils._clean_answer(
+                    response, question_index
+                ),
+                max_regenerations=max_regenerations,
+                contract="a non-empty text answer",
+                error_message=f"answer for question {index} must not be empty",
+            )
+        )
     return answers
 
 
@@ -136,6 +159,7 @@ def generate_statements(
     temperature: float = 0.7,
     max_new_tokens: int = 256,
     device: str | None = None,
+    max_regenerations: int = 0,
 ) -> list[str]:
     """Generate factual statements from one text chunk with a causal chat model.
 
@@ -150,6 +174,7 @@ def generate_statements(
         max_new_tokens: Maximum number of tokens available for the JSON response.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
             CUDA is preferred, followed by MPS and CPU.
+        max_regenerations: Additional attempts allowed after an invalid model response.
 
     Returns:
         A list containing exactly ``statement_count`` non-empty statements.
@@ -160,8 +185,9 @@ def generate_statements(
             context window, the tokenizer has no chat template, or the model response is not a
             JSON array containing exactly the requested number of non-empty strings.
 
-    Generation is stochastic and happens once without retries. The chunk is never truncated.
+    Generation is stochastic. The chunk is never truncated.
     """
+    utils._validate_max_regenerations(max_regenerations)
     utils._validate_statement_arguments(
         chunk,
         model_name,
@@ -172,18 +198,31 @@ def generate_statements(
         device,
     )
     messages = utils._statement_messages(chunk, statement_count, prompt)
-    response = _generate_text(
-        messages,
-        model_name,
-        temperature=temperature,
-        max_new_tokens=max_new_tokens,
-        device=device,
-        chat_template_error="model tokenizer must define a chat template",
-        context_window_error=(
-            "chunk and generated response do not fit within the model context window"
-        ),
+
+    def generate(attempt_messages: list[dict[str, str]]) -> object:
+        return _generate_text(
+            attempt_messages,
+            model_name,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            device=device,
+            chat_template_error="model tokenizer must define a chat template",
+            context_window_error=(
+                "chunk and generated response do not fit within the model context window"
+            ),
+        )
+
+    error_message = (
+        f"model response must be a JSON array of exactly {statement_count} non-empty strings"
     )
-    return utils._parse_statement_response(response, statement_count)
+    return utils._generate_with_validation(
+        messages,
+        generate,
+        lambda response: utils._parse_statement_response(response, statement_count),
+        max_regenerations=max_regenerations,
+        contract=f"a JSON array of exactly {statement_count} non-empty strings",
+        error_message=error_message,
+    )
 
 
 def generate_information_preservation_statements(
@@ -194,6 +233,7 @@ def generate_information_preservation_statements(
     temperature: float = 0.7,
     max_new_tokens: int = 256,
     device: str | None = None,
+    max_regenerations: int = 0,
 ) -> tuple[str, list[str]]:
     """Generate one true and three false statements for HOPE Information Preservation.
 
@@ -204,6 +244,7 @@ def generate_information_preservation_statements(
         temperature: Positive non-zero sampling temperature.
         max_new_tokens: Maximum number of tokens available for the JSON response.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override.
+        max_regenerations: Additional attempts allowed after an invalid model response.
 
     Returns:
         The stripped true statement and exactly three distinct stripped false statements.
@@ -213,8 +254,9 @@ def generate_information_preservation_statements(
         ValueError: If an argument, context-window budget, chat template, or model response
             violates the required contract.
 
-    Generation happens once without retries or truncation.
+    Generation does not truncate the segment.
     """
+    utils._validate_max_regenerations(max_regenerations)
     utils._validate_local_information_preservation_arguments(
         segment,
         model_name,
@@ -223,18 +265,36 @@ def generate_information_preservation_statements(
         max_new_tokens,
         device,
     )
-    response = _generate_text(
-        utils._information_preservation_messages(segment, prompt),
-        model_name,
-        temperature=temperature,
-        max_new_tokens=max_new_tokens,
-        device=device,
-        chat_template_error="model tokenizer must define a chat template",
-        context_window_error=(
-            "segment and generated response do not fit within the model context window"
-        ),
+    messages = utils._information_preservation_messages(segment, prompt)
+
+    def generate(attempt_messages: list[dict[str, str]]) -> object:
+        return _generate_text(
+            attempt_messages,
+            model_name,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            device=device,
+            chat_template_error="model tokenizer must define a chat template",
+            context_window_error=(
+                "segment and generated response do not fit within the model context window"
+            ),
+        )
+
+    error_message = (
+        "model response must be a JSON object with one non-empty true_statement and exactly "
+        "three distinct non-empty false_statements"
     )
-    return utils._parse_information_preservation_response(response)
+    return utils._generate_with_validation(
+        messages,
+        generate,
+        utils._parse_information_preservation_response,
+        max_regenerations=max_regenerations,
+        contract=(
+            "a JSON object with one non-empty true_statement and exactly three distinct "
+            "non-empty false_statements that differ from true_statement"
+        ),
+        error_message=error_message,
+    )
 
 
 def evaluate_information_preservation(
@@ -248,6 +308,7 @@ def evaluate_information_preservation(
     max_new_tokens: int = 32,
     seed: int | None = None,
     device: str | None = None,
+    max_regenerations: int = 0,
 ) -> int:
     """Run one local HOPE Information Preservation multiple-choice evaluation.
 
@@ -262,6 +323,7 @@ def evaluate_information_preservation(
         max_new_tokens: Maximum number of tokens available for the JSON response.
         seed: Optional seed used only to shuffle the four statements reproducibly.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override.
+        max_regenerations: Additional attempts allowed after an invalid model response.
 
     Returns:
         ``1`` when the model selects the true statement, otherwise ``0``.
@@ -271,8 +333,9 @@ def evaluate_information_preservation(
         ValueError: If an argument, context-window budget, chat template, or model response
             violates the required contract.
 
-    Evaluation performs one generation without retries or truncation and does not mutate inputs.
+    Evaluation shuffles statements once, does not truncate inputs, and does not mutate them.
     """
+    utils._validate_max_regenerations(max_regenerations)
     true_statement_item, false_statement_items, relevant_chunk_items = (
         utils._validate_local_information_preservation_evaluation_arguments(
             true_statement,
@@ -294,23 +357,36 @@ def evaluate_information_preservation(
     true_statement_index = next(
         index for index, (_, is_true) in enumerate(statements, start=1) if is_true
     )
-    response = _generate_text(
-        utils._information_preservation_evaluation_messages(
-            [statement for statement, _ in statements],
-            relevant_chunk_items,
-            prompt,
-        ),
-        model_name,
-        temperature=temperature,
-        max_new_tokens=max_new_tokens,
-        device=device,
-        chat_template_error="model tokenizer must define a chat template",
-        context_window_error=(
-            "statements, relevant chunks, and generated response do not fit within the "
-            "model context window"
+    messages = utils._information_preservation_evaluation_messages(
+        [statement for statement, _ in statements],
+        relevant_chunk_items,
+        prompt,
+    )
+
+    def generate(attempt_messages: list[dict[str, str]]) -> object:
+        return _generate_text(
+            attempt_messages,
+            model_name,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            device=device,
+            chat_template_error="model tokenizer must define a chat template",
+            context_window_error=(
+                "statements, relevant chunks, and generated response do not fit within the "
+                "model context window"
+            ),
+        )
+
+    selected_index = utils._generate_with_validation(
+        messages,
+        generate,
+        utils._parse_information_preservation_evaluation_response,
+        max_regenerations=max_regenerations,
+        contract="a JSON object containing only integer selected_index from 1 to 4",
+        error_message=(
+            "model response must be a JSON object containing only selected_index from 1 to 4"
         ),
     )
-    selected_index = utils._parse_information_preservation_evaluation_response(response)
     return int(selected_index == true_statement_index)
 
 
@@ -323,6 +399,7 @@ def generate_questions(
     temperature: float = 0.7,
     max_new_tokens: int = 256,
     device: str | None = None,
+    max_regenerations: int = 0,
 ) -> list[str]:
     """Generate questions answerable from one text chunk with a causal chat model.
 
@@ -337,6 +414,7 @@ def generate_questions(
         max_new_tokens: Maximum number of tokens available for the JSON response.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
             CUDA is preferred, followed by MPS and CPU.
+        max_regenerations: Additional attempts allowed after an invalid model response.
 
     Returns:
         A list containing exactly ``question_count`` non-empty questions.
@@ -347,8 +425,9 @@ def generate_questions(
             context window, the tokenizer has no chat template, or the model response is not a
             JSON array containing exactly the requested number of non-empty strings.
 
-    Generation is stochastic and happens once without retries. The chunk is never truncated.
+    Generation is stochastic. The chunk is never truncated.
     """
+    utils._validate_max_regenerations(max_regenerations)
     utils._validate_question_arguments(
         chunk,
         model_name,
@@ -359,15 +438,28 @@ def generate_questions(
         device,
     )
     messages = utils._question_messages(chunk, question_count, prompt)
-    response = _generate_text(
-        messages,
-        model_name,
-        temperature=temperature,
-        max_new_tokens=max_new_tokens,
-        device=device,
-        chat_template_error="model tokenizer must define a chat template",
-        context_window_error=(
-            "chunk and generated response do not fit within the model context window"
-        ),
+
+    def generate(attempt_messages: list[dict[str, str]]) -> object:
+        return _generate_text(
+            attempt_messages,
+            model_name,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            device=device,
+            chat_template_error="model tokenizer must define a chat template",
+            context_window_error=(
+                "chunk and generated response do not fit within the model context window"
+            ),
+        )
+
+    error_message = (
+        f"model response must be a JSON array of exactly {question_count} non-empty strings"
     )
-    return utils._parse_question_response(response, question_count)
+    return utils._generate_with_validation(
+        messages,
+        generate,
+        lambda response: utils._parse_question_response(response, question_count),
+        max_regenerations=max_regenerations,
+        contract=f"a JSON array of exactly {question_count} non-empty strings",
+        error_message=error_message,
+    )

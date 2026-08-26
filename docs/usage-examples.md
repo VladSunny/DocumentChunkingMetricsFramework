@@ -283,8 +283,9 @@ print(matches)
 ## Statement, question, and answer generation
 
 Local generation uses a Hugging Face causal chat model. API generation uses OpenAI-compatible Chat
-Completions. Calls are made without retries, so production callers should handle provider errors
-and retry policy outside the library.
+Completions. Results are validated strictly with Pydantic. `max_regenerations` controls additional
+attempts after an invalid result and defaults to `0`; provider and model-pipeline errors are always
+propagated immediately, so callers should handle those retry policies outside the library.
 
 ### Statements with a local model
 
@@ -297,6 +298,7 @@ statements = local.generate_statements(
     statement_count=3,
     temperature=0.7,
     max_new_tokens=192,
+    max_regenerations=2,
     device="cpu",
 )
 print(statements)
@@ -317,6 +319,7 @@ statements = api.generate_statements(
     statement_count=3,
     temperature=0.7,
     max_new_tokens=192,
+    max_regenerations=2,
 )
 print(statements)
 ```
@@ -375,6 +378,7 @@ answers = local.generate_answers(
     ],
     temperature=0.0,
     max_new_tokens=64,
+    max_regenerations=2,
     device="cpu",
 )
 print(answers)
@@ -424,6 +428,7 @@ true_statement, false_statements = api.generate_information_preservation_stateme
     base_url="https://api.provider.example/v1",
     temperature=0.7,
     max_new_tokens=192,
+    max_regenerations=2,
 )
 print(true_statement, false_statements)
 ```
@@ -449,6 +454,7 @@ score = api.evaluate_information_preservation(
     temperature=0.0,
     max_new_tokens=32,
     seed=0,
+    max_regenerations=2,
 )
 print(score)
 ```
@@ -783,8 +789,9 @@ document_information_preservation = fmean(test_scores)
 print(document_information_preservation)
 ```
 
-Use multiple independently generated tests per document in a serious evaluation. The local
-generation helpers do not return a partial aggregate or retry automatically.
+Use multiple independently generated tests per document in a serious evaluation. Generation
+helpers do not return a partial aggregate; optional regeneration applies only to an invalid result
+for the current operation.
 
 ### Manual HOPE Aggregate
 

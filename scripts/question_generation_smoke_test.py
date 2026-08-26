@@ -15,7 +15,8 @@ def main() -> None:
     questions = local.generate_questions(
         CHUNK,
         question_count=QUESTION_COUNT,
-        device="cpu",
+        max_regenerations=3,
+        # device="",
     )
 
     assert len(questions) == QUESTION_COUNT

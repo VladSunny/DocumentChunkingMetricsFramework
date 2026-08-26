@@ -1,9 +1,20 @@
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from string import Formatter
+from typing import TypeVar
 
 import numpy as np
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from .prompts import (
     DEFAULT_ANSWER_SYSTEM_PROMPT,
@@ -12,6 +23,126 @@ from .prompts import (
     DEFAULT_QUESTION_SYSTEM_PROMPT,
     DEFAULT_STATEMENT_SYSTEM_PROMPT,
 )
+
+_ValidatedResponse = TypeVar("_ValidatedResponse")
+
+
+class _NonEmptyTextResponse(RootModel[str]):
+    model_config = ConfigDict(strict=True)
+
+    @field_validator("root")
+    @classmethod
+    def _strip_and_require_content(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("text must not be empty")
+        return value
+
+
+class _StringListResponse(RootModel[list[str]]):
+    model_config = ConfigDict(strict=True)
+
+    @field_validator("root")
+    @classmethod
+    def _strip_and_validate_items(
+        cls,
+        value: list[str],
+        info: ValidationInfo,
+    ) -> list[str]:
+        expected_count = info.context["expected_count"] if info.context else None
+        if len(value) != expected_count:
+            raise ValueError(f"list must contain exactly {expected_count} items")
+        cleaned = [item.strip() for item in value]
+        if any(not item for item in cleaned):
+            raise ValueError("list items must not be empty")
+        return cleaned
+
+
+class _InformationPreservationResponse(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    true_statement: str
+    false_statements: list[str] = Field(min_length=3, max_length=3)
+
+    @field_validator("true_statement")
+    @classmethod
+    def _strip_true_statement(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("true_statement must not be empty")
+        return value
+
+    @field_validator("false_statements")
+    @classmethod
+    def _strip_and_validate_false_statements(cls, value: list[str]) -> list[str]:
+        cleaned = [statement.strip() for statement in value]
+        if any(not statement for statement in cleaned):
+            raise ValueError("false_statements must not contain empty strings")
+        if len(set(cleaned)) != 3:
+            raise ValueError("false_statements must be distinct")
+        return cleaned
+
+    @model_validator(mode="after")
+    def _require_false_statements_to_differ_from_true(
+        self,
+    ) -> "_InformationPreservationResponse":
+        if self.true_statement in self.false_statements:
+            raise ValueError("false_statements must not contain true_statement")
+        return self
+
+
+class _InformationPreservationEvaluationResponse(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    selected_index: int = Field(ge=1, le=4)
+
+
+def _validate_max_regenerations(max_regenerations: int) -> None:
+    if not isinstance(max_regenerations, int) or isinstance(max_regenerations, bool):
+        raise TypeError("max_regenerations must be an integer")
+    if max_regenerations < 0:
+        raise ValueError("max_regenerations must be greater than or equal to zero")
+
+
+def _regeneration_messages(
+    original_messages: Sequence[dict[str, str]],
+    invalid_response: object,
+    contract: str,
+) -> list[dict[str, str]]:
+    response_text = (
+        invalid_response
+        if isinstance(invalid_response, str)
+        else json.dumps(invalid_response, ensure_ascii=False)
+    )
+    return [
+        *original_messages,
+        {"role": "assistant", "content": response_text},
+        {
+            "role": "user",
+            "content": f"The previous response was invalid. Return {contract}.",
+        },
+    ]
+
+
+def _generate_with_validation(
+    original_messages: list[dict[str, str]],
+    generate: Callable[[list[dict[str, str]]], object],
+    validate: Callable[[object], _ValidatedResponse],
+    *,
+    max_regenerations: int,
+    contract: str,
+    error_message: str,
+) -> _ValidatedResponse:
+    messages = original_messages
+    for attempt in range(max_regenerations + 1):
+        response = generate(messages)
+        try:
+            return validate(response)
+        except ValidationError as error:
+            if attempt == max_regenerations:
+                raise ValueError(error_message) from error
+            messages = _regeneration_messages(original_messages, response, contract)
+    raise RuntimeError("unreachable")
 
 
 def _statement_messages(
@@ -38,21 +169,12 @@ def _statement_messages(
     ]
 
 
-def _parse_statement_response(response: str, statement_count: int) -> list[str]:
-    error_message = (
-        f"model response must be a JSON array of exactly {statement_count} non-empty strings"
+def _parse_statement_response(response: object, statement_count: int) -> list[str]:
+    statements = _StringListResponse.model_validate_json(
+        response,
+        context={"expected_count": statement_count},
     )
-    try:
-        statements = json.loads(response)
-    except json.JSONDecodeError as error:
-        raise ValueError(error_message) from error
-    if (
-        not isinstance(statements, list)
-        or len(statements) != statement_count
-        or any(not isinstance(statement, str) or not statement.strip() for statement in statements)
-    ):
-        raise ValueError(error_message)
-    return [statement.strip() for statement in statements]
+    return statements.root
 
 
 def _information_preservation_messages(
@@ -73,41 +195,8 @@ def _information_preservation_messages(
 
 
 def _parse_information_preservation_response(response: object) -> tuple[str, list[str]]:
-    error_message = (
-        "model response must be a JSON object with one non-empty true_statement and exactly "
-        "three distinct non-empty false_statements"
-    )
-    if not isinstance(response, str):
-        raise ValueError(error_message)
-    try:
-        statements = json.loads(response)
-    except json.JSONDecodeError as error:
-        raise ValueError(error_message) from error
-    if not isinstance(statements, dict) or set(statements) != {
-        "true_statement",
-        "false_statements",
-    }:
-        raise ValueError(error_message)
-
-    true_statement = statements["true_statement"]
-    false_statements = statements["false_statements"]
-    if (
-        not isinstance(true_statement, str)
-        or not true_statement.strip()
-        or not isinstance(false_statements, list)
-        or len(false_statements) != 3
-        or any(
-            not isinstance(statement, str) or not statement.strip()
-            for statement in false_statements
-        )
-    ):
-        raise ValueError(error_message)
-
-    true_statement = true_statement.strip()
-    false_statements = [statement.strip() for statement in false_statements]
-    if len(set(false_statements)) != 3 or true_statement in false_statements:
-        raise ValueError(error_message)
-    return true_statement, false_statements
+    statements = _InformationPreservationResponse.model_validate_json(response)
+    return statements.true_statement, statements.false_statements
 
 
 def _information_preservation_evaluation_messages(
@@ -136,25 +225,8 @@ def _information_preservation_evaluation_messages(
 
 
 def _parse_information_preservation_evaluation_response(response: object) -> int:
-    error_message = (
-        "model response must be a JSON object containing only selected_index from 1 to 4"
-    )
-    if not isinstance(response, str):
-        raise ValueError(error_message)
-    try:
-        selection = json.loads(response)
-    except json.JSONDecodeError as error:
-        raise ValueError(error_message) from error
-    if not isinstance(selection, dict) or set(selection) != {"selected_index"}:
-        raise ValueError(error_message)
-    selected_index = selection["selected_index"]
-    if (
-        not isinstance(selected_index, int)
-        or isinstance(selected_index, bool)
-        or not 1 <= selected_index <= 4
-    ):
-        raise ValueError(error_message)
-    return selected_index
+    selection = _InformationPreservationEvaluationResponse.model_validate_json(response)
+    return selection.selected_index
 
 
 def _question_messages(
@@ -181,21 +253,12 @@ def _question_messages(
     ]
 
 
-def _parse_question_response(response: str, question_count: int) -> list[str]:
-    error_message = (
-        f"model response must be a JSON array of exactly {question_count} non-empty strings"
+def _parse_question_response(response: object, question_count: int) -> list[str]:
+    questions = _StringListResponse.model_validate_json(
+        response,
+        context={"expected_count": question_count},
     )
-    try:
-        questions = json.loads(response)
-    except json.JSONDecodeError as error:
-        raise ValueError(error_message) from error
-    if (
-        not isinstance(questions, list)
-        or len(questions) != question_count
-        or any(not isinstance(question, str) or not question.strip() for question in questions)
-    ):
-        raise ValueError(error_message)
-    return [question.strip() for question in questions]
+    return questions.root
 
 
 def _answer_messages(
@@ -219,9 +282,8 @@ def _answer_messages(
 
 
 def _clean_answer(response: object, question_index: int) -> str:
-    if not isinstance(response, str) or not response.strip():
-        raise ValueError(f"answer for question {question_index} must not be empty")
-    return response.strip()
+    del question_index
+    return _NonEmptyTextResponse.model_validate(response).root
 
 
 def _validate_embedding_arguments(
