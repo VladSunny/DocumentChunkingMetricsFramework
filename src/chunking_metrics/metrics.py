@@ -83,6 +83,7 @@ def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> list[float]:
 
     embs = list(embs)
     if len(embs) <= 0:
+        print("No embeddings provided for intrachunk cohesion evaluation.")
         return []
 
     chunk_cohesions: list[float] = []
@@ -95,6 +96,7 @@ def intrachunk_cohesion(embs: Iterable[np.ndarray]) -> list[float]:
             or np.iscomplexobj(chunk_embs)
             or not np.all(np.isfinite(chunk_embs))
         ):
+            print("Invalid embeddings provided for intrachunk cohesion evaluation.")
             return []
 
         centroid = np.mean(chunk_embs, axis=0)
