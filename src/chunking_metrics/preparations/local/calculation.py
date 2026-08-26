@@ -1,107 +1,13 @@
 import warnings
 from collections.abc import Sequence
-from functools import lru_cache
-from typing import Any
 
 import numpy as np
 import torch
-from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from . import utils
 
 DEFAULT_EMBEDDING_MODEL = "cointegrated/rubert-tiny2"
 DEFAULT_PERPLEXITY_MODEL = "ai-forever/rugpt3small_based_on_gpt2"
-
-_IGNORED_LABEL = -100
-_UNBOUNDED_MODEL_LENGTH = 1_000_000
-
-
-def _resolve_device(device: str | None) -> str:
-    if device is None:
-        if torch.cuda.is_available():
-            return "cuda"
-        if torch.backends.mps.is_available():
-            return "mps"
-        return "cpu"
-
-    try:
-        resolved_device = torch.device(device)
-    except (RuntimeError, TypeError) as error:
-        raise ValueError(f"invalid device: {device!r}") from error
-
-    if resolved_device.type not in {"cpu", "cuda", "mps"}:
-        raise ValueError("device must be cpu, cuda, or mps")
-    if resolved_device.type == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA is not available")
-    if resolved_device.type == "mps" and not torch.backends.mps.is_available():
-        raise ValueError("MPS is not available")
-    return str(resolved_device)
-
-
-def _model_max_length(tokenizer: Any, model: Any) -> int:
-    candidates = (
-        getattr(model.config, "max_position_embeddings", None),
-        getattr(model.config, "n_positions", None),
-        getattr(tokenizer, "model_max_length", None),
-    )
-    finite_lengths = [
-        length
-        for length in candidates
-        if isinstance(length, int) and 0 < length < _UNBOUNDED_MODEL_LENGTH
-    ]
-    if not finite_lengths:
-        raise ValueError("could not determine the model context window")
-    return min(finite_lengths)
-
-
-@lru_cache(maxsize=1)
-def _load_model_and_tokenizer(model_name: str, device: str) -> tuple[Any, Any, int]:
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    model = model.to(device)
-    model.eval()
-    return tokenizer, model, _model_max_length(tokenizer, model)
-
-
-@lru_cache(maxsize=1)
-def _load_embedding_model(model_name: str, device: str) -> SentenceTransformer:
-    model = SentenceTransformer(model_name, device=device)
-    model.eval()
-    return model
-
-
-def _warn_about_embedding_truncation(texts: list[str], model: Any) -> None:
-    max_length = model.max_seq_length
-    if not isinstance(max_length, int) or max_length <= 0:
-        return
-
-    tokenized = model.tokenizer(
-        texts,
-        add_special_tokens=True,
-        padding=False,
-        truncation=False,
-    )
-    truncated_count = sum(len(input_ids) > max_length for input_ids in tokenized["input_ids"])
-    if truncated_count:
-        noun = "text exceeds" if truncated_count == 1 else "texts exceed"
-        warnings.warn(
-            f"{truncated_count} {noun} the model limit of {max_length} tokens "
-            "and will be truncated",
-            UserWarning,
-            stacklevel=2,
-        )
-
-
-def _prefix_token_id(tokenizer: Any, model: Any) -> int:
-    candidates = (
-        getattr(tokenizer, "bos_token_id", None),
-        getattr(model.config, "bos_token_id", None),
-        getattr(tokenizer, "eos_token_id", None),
-        getattr(model.config, "eos_token_id", None),
-    )
-    for token_id in candidates:
-        if isinstance(token_id, int):
-            return token_id
-    raise ValueError("the model must define a BOS or EOS token")
 
 
 def calculate_perplexity(
@@ -134,8 +40,10 @@ def calculate_perplexity(
         raise ValueError("text must not be empty")
     if not model_name.strip():
         raise ValueError("model_name must not be empty")
-    resolved_device = _resolve_device(device)
-    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
+    resolved_device = utils._resolve_device(device)
+    tokenizer, model, max_length = utils._load_model_and_tokenizer(
+        model_name.strip(), resolved_device
+    )
 
     target_text = f" {text.lstrip()}"
     context_text = context.rstrip() if context is not None else ""
@@ -146,7 +54,7 @@ def calculate_perplexity(
     if not target_ids:
         raise ValueError("text does not contain any model tokens")
 
-    prefix_token_id = _prefix_token_id(tokenizer, model)
+    prefix_token_id = utils._prefix_token_id(tokenizer, model)
     target_length = 1 + len(target_ids)
     if target_length > max_length:
         raise ValueError(
@@ -164,7 +72,7 @@ def calculate_perplexity(
         )
 
     input_ids = [prefix_token_id, *context_ids, *target_ids]
-    labels = [_IGNORED_LABEL] * (1 + len(context_ids)) + target_ids
+    labels = [utils._IGNORED_LABEL] * (1 + len(context_ids)) + target_ids
     input_tensor = torch.tensor([input_ids], dtype=torch.long, device=resolved_device)
     label_tensor = torch.tensor([labels], dtype=torch.long, device=resolved_device)
 
@@ -214,9 +122,9 @@ def calculate_embeddings(
         raise TypeError("batch_size must be an integer")
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
-    resolved_device = _resolve_device(device)
-    model = _load_embedding_model(model_name.strip(), resolved_device)
-    _warn_about_embedding_truncation(text_items, model)
+    resolved_device = utils._resolve_device(device)
+    model = utils._load_embedding_model(model_name.strip(), resolved_device)
+    utils._warn_about_embedding_truncation(text_items, model)
     encode_input = texts if isinstance(texts, str) else text_items
     return np.asarray(
         model.encode(
