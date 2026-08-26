@@ -283,9 +283,11 @@ print(matches)
 ## Statement, question, and answer generation
 
 Local generation uses a Hugging Face causal chat model. API generation uses OpenAI-compatible Chat
-Completions. Results are validated strictly with Pydantic. `max_regenerations` controls additional
-attempts after an invalid result and defaults to `0`; provider and model-pipeline errors are always
-propagated immediately, so callers should handle those retry policies outside the library.
+Completions. LLM responses are validated strictly with internal Pydantic schemas; public Python
+arguments are checked for documented semantic preconditions rather than exhaustively re-validating
+every annotated type. `max_regenerations` controls additional attempts after an invalid response
+and defaults to `0`; provider and model-pipeline errors are always propagated immediately, so
+callers should handle those retry policies outside the library.
 
 ### Statements with a local model
 

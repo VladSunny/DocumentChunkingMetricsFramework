@@ -1,16 +1,183 @@
+import json
+import math
 import random
 from collections.abc import Sequence
+from typing import TypeVar
 
 from openai import OpenAI
+from pydantic import BaseModel, ValidationError
 
-from ... import utils
 from ...prompts import (
     DEFAULT_ANSWER_PROMPT,
+    DEFAULT_ANSWER_SYSTEM_PROMPT,
     DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
     DEFAULT_INFORMATION_PRESERVATION_PROMPT,
+    DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
     DEFAULT_QUESTION_PROMPT,
+    DEFAULT_QUESTION_SYSTEM_PROMPT,
     DEFAULT_STATEMENT_PROMPT,
+    DEFAULT_STATEMENT_SYSTEM_PROMPT,
 )
+from .._generation import (
+    _build_messages,
+    _InformationPreservationEvaluationResponse,
+    _InformationPreservationResponse,
+    _NonEmptyTextResponse,
+    _StringListResponse,
+)
+
+_Response = TypeVar("_Response", bound=BaseModel)
+
+
+def _validate_max_regenerations(max_regenerations: int) -> None:
+    if not isinstance(max_regenerations, int) or isinstance(max_regenerations, bool):
+        raise TypeError("max_regenerations must be an integer")
+    if max_regenerations < 0:
+        raise ValueError("max_regenerations must be greater than or equal to zero")
+
+
+def _validate_generation_limits(
+    temperature: float,
+    max_new_tokens: int,
+    *,
+    allow_zero_temperature: bool,
+) -> None:
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        raise TypeError("temperature must be a number")
+    if not math.isfinite(temperature):
+        raise ValueError("temperature must be finite")
+    minimum_is_valid = temperature >= 0 if allow_zero_temperature else temperature > 0
+    if not minimum_is_valid:
+        qualifier = (
+            "greater than or equal to zero" if allow_zero_temperature else "greater than zero"
+        )
+        raise ValueError(f"temperature must be {qualifier}")
+    if not isinstance(max_new_tokens, int) or isinstance(max_new_tokens, bool):
+        raise TypeError("max_new_tokens must be an integer")
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be greater than zero")
+
+
+def _require_non_empty(value: str, name: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError(f"{name} must not be empty")
+    return cleaned
+
+
+def _validate_api_credentials(
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    *,
+    allow_empty_base_url: bool,
+) -> None:
+    _require_non_empty(model_name, "model_name")
+    _require_non_empty(api_key, "api_key")
+    if not allow_empty_base_url and base_url is not None:
+        _require_non_empty(base_url, "base_url")
+
+
+def _regeneration_messages(
+    original_messages: list[dict[str, str]],
+    invalid_response: object,
+    contract: str,
+) -> list[dict[str, str]]:
+    response_text = (
+        invalid_response
+        if isinstance(invalid_response, str)
+        else json.dumps(invalid_response, ensure_ascii=False)
+    )
+    return [
+        *original_messages,
+        {"role": "assistant", "content": response_text},
+        {"role": "user", "content": f"The previous response was invalid. Return {contract}."},
+    ]
+
+
+def _generate_validated(
+    client: OpenAI,
+    original_messages: list[dict[str, str]],
+    response_schema: type[_Response],
+    validation_context: dict[str, object] | None,
+    *,
+    model_name: str,
+    temperature: float,
+    max_new_tokens: int,
+    max_regenerations: int,
+    contract: str,
+    error_message: str,
+    json_response: bool,
+) -> _Response:
+    messages = original_messages
+    for attempt in range(max_regenerations + 1):
+        request: dict[str, object] = {
+            "model": model_name,
+            "messages": messages,
+            "stream": False,
+            "temperature": temperature,
+            "max_tokens": max_new_tokens,
+        }
+        if json_response:
+            request.update(
+                extra_body={"thinking": {"type": "disabled"}},
+                response_format={"type": "json_object"},
+            )
+        response = client.chat.completions.create(**request)
+        content = response.choices[0].message.content
+        try:
+            if json_response:
+                return response_schema.model_validate_json(content, context=validation_context)
+            return response_schema.model_validate(content, context=validation_context)
+        except ValidationError as error:
+            if attempt == max_regenerations:
+                raise ValueError(error_message) from error
+            messages = _regeneration_messages(original_messages, content, contract)
+    raise RuntimeError("unreachable")
+
+
+def _validate_answer_inputs(
+    questions: Sequence[str],
+    chunk: str,
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    additional_chunks_by_question: Sequence[Sequence[str]] | None,
+    temperature: float,
+    max_new_tokens: int,
+) -> tuple[list[str], list[list[str]]]:
+    if isinstance(questions, (str, bytes)) or not isinstance(questions, Sequence):
+        raise TypeError("questions must be a sequence of strings")
+    question_items = list(questions)
+    if not question_items:
+        raise ValueError("questions must not be empty")
+    for index, question in enumerate(question_items):
+        _require_non_empty(question, f"questions[{index}]")
+    _require_non_empty(chunk, "chunk")
+    _validate_api_credentials(model_name, api_key, base_url, allow_empty_base_url=False)
+    _validate_generation_limits(temperature, max_new_tokens, allow_zero_temperature=True)
+
+    if additional_chunks_by_question is None:
+        return question_items, [[] for _ in question_items]
+    if len(additional_chunks_by_question) != len(question_items):
+        raise ValueError("additional_chunks_by_question must contain one item per question")
+    additional_chunk_items: list[list[str]] = []
+    for question_index, additional_chunks in enumerate(additional_chunks_by_question):
+        if isinstance(additional_chunks, (str, bytes)) or not isinstance(
+            additional_chunks, Sequence
+        ):
+            raise TypeError(
+                f"additional_chunks_by_question[{question_index}] must be a sequence of strings"
+            )
+        chunk_items = list(additional_chunks)
+        for chunk_index, additional_chunk in enumerate(chunk_items):
+            _require_non_empty(
+                additional_chunk,
+                f"additional_chunks_by_question[{question_index}][{chunk_index}]",
+            )
+        additional_chunk_items.append(chunk_items)
+    return question_items, additional_chunk_items
 
 
 def generate_answers(
@@ -26,82 +193,67 @@ def generate_answers(
     max_new_tokens: int = 128,
     max_regenerations: int = 0,
 ) -> list[str]:
-    """Answer questions independently through OpenAI-compatible Chat Completions.
-
-    Args:
-        questions: Non-empty questions to answer, in output order.
-        chunk: Required primary source used for every question.
-        model_name: Model identifier understood by the API provider.
-        api_key: API key passed to the OpenAI-compatible client.
-        base_url: Optional OpenAI-compatible API base URL.
-        additional_chunks_by_question: Optional per-question sequences of extra sources. The
-            outer sequence must have the same length as ``questions``.
-        prompt: User-message format string containing ``{question}``, ``{chunk}``, and
-            ``{additional_chunks}`` placeholders. Values are inserted as JSON.
-        temperature: Non-negative generation temperature.
-        max_new_tokens: Maximum number of tokens generated for each answer.
-        max_regenerations: Additional attempts allowed after an invalid model response.
-
-    Returns:
-        One stripped, non-empty answer per question, preserving question order.
-
-    Raises:
-        TypeError: If an argument has an invalid type.
-        ValueError: If an argument is invalid or an API response has empty message content.
-
-    A single client is reused for sequential, independent calls. The regeneration limit applies
-    separately to each question, and the function does not return partial results.
-    """
-    utils._validate_max_regenerations(max_regenerations)
-    if not isinstance(api_key, str):
-        raise TypeError("api_key must be a string")
-    if base_url is not None and not isinstance(base_url, str):
-        raise TypeError("base_url must be a string or None")
-    question_items, additional_chunk_items = utils._validate_answer_arguments(
+    """Answer questions independently through OpenAI-compatible Chat Completions."""
+    _validate_max_regenerations(max_regenerations)
+    question_items, additional_chunk_items = _validate_answer_inputs(
         questions,
         chunk,
         model_name,
+        api_key,
+        base_url,
         additional_chunks_by_question,
-        prompt,
         temperature,
         max_new_tokens,
-        None,
     )
-    if not api_key.strip():
-        raise ValueError("api_key must not be empty")
-    if base_url is not None and not base_url.strip():
-        raise ValueError("base_url must not be empty")
-
+    message_items = [
+        _build_messages(
+            DEFAULT_ANSWER_SYSTEM_PROMPT,
+            prompt,
+            {
+                "question": question,
+                "chunk": chunk,
+                "additional_chunks": additional_chunks,
+            },
+        )
+        for question, additional_chunks in zip(question_items, additional_chunk_items, strict=True)
+    ]
     client = OpenAI(api_key=api_key, base_url=base_url)
     answers: list[str] = []
-    for index, (question, additional_chunks) in enumerate(
-        zip(question_items, additional_chunk_items, strict=True)
-    ):
-        original_messages = utils._answer_messages(question, chunk, additional_chunks, prompt)
-
-        def generate(messages: list[dict[str, str]]) -> object:
-            response = client.chat.completions.create(
-                model=model_name.strip(),
-                messages=messages,
-                stream=False,
-                temperature=temperature,
-                max_tokens=max_new_tokens,
-            )
-            return response.choices[0].message.content
-
-        answers.append(
-            utils._generate_with_validation(
-                original_messages,
-                generate,
-                lambda response, question_index=index: utils._clean_answer(
-                    response, question_index
-                ),
-                max_regenerations=max_regenerations,
-                contract="a non-empty text answer",
-                error_message=f"answer for question {index} must not be empty",
-            )
+    for index, messages in enumerate(message_items):
+        answer = _generate_validated(
+            client,
+            messages,
+            _NonEmptyTextResponse,
+            None,
+            model_name=model_name.strip(),
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            max_regenerations=max_regenerations,
+            contract="a non-empty text answer",
+            error_message=f"answer for question {index} must not be empty",
+            json_response=False,
         )
+        answers.append(answer.root)
     return answers
+
+
+def _validate_list_generation_inputs(
+    chunk: str,
+    model_name: str,
+    api_key: str,
+    base_url: str,
+    count: int,
+    count_name: str,
+    temperature: float,
+    max_new_tokens: int,
+) -> None:
+    _require_non_empty(chunk, "chunk")
+    _validate_api_credentials(model_name, api_key, base_url, allow_empty_base_url=True)
+    if not isinstance(count, int) or isinstance(count, bool):
+        raise TypeError(f"{count_name} must be an integer")
+    if count <= 0:
+        raise ValueError(f"{count_name} must be greater than zero")
+    _validate_generation_limits(temperature, max_new_tokens, allow_zero_temperature=False)
 
 
 def generate_statements(
@@ -116,59 +268,39 @@ def generate_statements(
     max_new_tokens: int = 256,
     max_regenerations: int = 0,
 ) -> list[str]:
-    """Generate factual statements from one text chunk with a causal chat model.
-
-    Args:
-        chunk: Source text from which the statements are extracted.
-        model_name
-        api_key
-        prompt: Format string used for the user message. It must contain ``{chunk}`` and
-            ``{statement_count}`` placeholders. Escape literal braces by doubling them.
-        statement_count: Exact number of statements required in the model response.
-        temperature: Positive non-zero sampling temperature used to encourage concept coverage.
-        max_new_tokens: Maximum number of tokens available for the JSON response.
-        max_regenerations: Additional attempts allowed after an invalid model response.
-
-    Returns:
-        A list containing exactly ``statement_count`` non-empty statements.
-
-    Raises:
-        TypeError: If an argument has an invalid type.
-        ValueError: If an argument is invalid, the prompt and response budget do not fit the
-            context window, the tokenizer has no chat template, or the model response is not a
-            JSON array containing exactly the requested number of non-empty strings.
-
-    Generation is stochastic. The chunk is never truncated.
-    """
-    utils._validate_max_regenerations(max_regenerations)
-    messages = utils._statement_messages(chunk, statement_count, prompt)
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    def generate(attempt_messages: list[dict[str, str]]) -> object:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=attempt_messages,
-            stream=False,
-            # reasoning_effort="low",
-            extra_body={"thinking": {"type": "disabled"}},
-            response_format={"type": "json_object"},
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-
-    error_message = (
-        f"model response must be a JSON array of exactly {statement_count} non-empty strings"
+    """Generate a strict JSON list of factual statements through an API."""
+    _validate_max_regenerations(max_regenerations)
+    _validate_list_generation_inputs(
+        chunk,
+        model_name,
+        api_key,
+        base_url,
+        statement_count,
+        "statement_count",
+        temperature,
+        max_new_tokens,
     )
-    return utils._generate_with_validation(
+    messages = _build_messages(
+        DEFAULT_STATEMENT_SYSTEM_PROMPT,
+        prompt,
+        {"chunk": chunk, "statement_count": statement_count},
+    )
+    response = _generate_validated(
+        OpenAI(api_key=api_key, base_url=base_url),
         messages,
-        generate,
-        lambda response: utils._parse_statement_response(response, statement_count),
+        _StringListResponse,
+        {"expected_count": statement_count},
+        model_name=model_name,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
         max_regenerations=max_regenerations,
         contract=f"a JSON array of exactly {statement_count} non-empty strings",
-        error_message=error_message,
+        error_message=(
+            f"model response must be a JSON array of exactly {statement_count} non-empty strings"
+        ),
+        json_response=True,
     )
+    return response.root
 
 
 def generate_information_preservation_statements(
@@ -182,66 +314,70 @@ def generate_information_preservation_statements(
     max_new_tokens: int = 256,
     max_regenerations: int = 0,
 ) -> tuple[str, list[str]]:
-    """Generate one true and three false statements for HOPE Information Preservation.
-
-    Args:
-        segment: Source document segment from which the statements are generated.
-        model_name: OpenAI-compatible chat model identifier.
-        api_key: API key passed to the OpenAI-compatible client.
-        base_url: Optional OpenAI-compatible API base URL.
-        prompt: User-message format string containing the ``{segment}`` placeholder.
-        temperature: Positive non-zero sampling temperature.
-        max_new_tokens: Maximum number of tokens available for the JSON response.
-        max_regenerations: Additional attempts allowed after an invalid model response.
-
-    Returns:
-        The non-empty true statement and a list of exactly three distinct non-empty false
-        statements.
-
-    Raises:
-        TypeError: If an argument has an invalid type.
-        ValueError: If an argument or the model response violates the required contract.
-    """
-    utils._validate_max_regenerations(max_regenerations)
-    utils._validate_information_preservation_arguments(
-        segment,
-        model_name,
-        api_key,
-        base_url,
+    """Generate one true and three distinct false statements through an API."""
+    _validate_max_regenerations(max_regenerations)
+    _require_non_empty(segment, "segment")
+    _validate_api_credentials(model_name, api_key, base_url, allow_empty_base_url=False)
+    _validate_generation_limits(temperature, max_new_tokens, allow_zero_temperature=False)
+    messages = _build_messages(
+        DEFAULT_INFORMATION_PRESERVATION_SYSTEM_PROMPT,
         prompt,
-        temperature,
-        max_new_tokens,
+        {"segment": segment},
     )
-    messages = utils._information_preservation_messages(segment, prompt)
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    def generate(attempt_messages: list[dict[str, str]]) -> object:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=attempt_messages,
-            stream=False,
-            extra_body={"thinking": {"type": "disabled"}},
-            response_format={"type": "json_object"},
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-
-    error_message = (
-        "model response must be a JSON object with one non-empty true_statement and exactly "
-        "three distinct non-empty false_statements"
-    )
-    return utils._generate_with_validation(
+    response = _generate_validated(
+        OpenAI(api_key=api_key, base_url=base_url),
         messages,
-        generate,
-        utils._parse_information_preservation_response,
+        _InformationPreservationResponse,
+        None,
+        model_name=model_name,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
         max_regenerations=max_regenerations,
         contract=(
             "a JSON object with one non-empty true_statement and exactly three distinct "
             "non-empty false_statements that differ from true_statement"
         ),
-        error_message=error_message,
+        error_message=(
+            "model response must be a JSON object with one non-empty true_statement and exactly "
+            "three distinct non-empty false_statements"
+        ),
+        json_response=True,
     )
+    return response.true_statement, response.false_statements
+
+
+def _validate_evaluation_inputs(
+    true_statement: str,
+    false_statements: Sequence[str],
+    relevant_chunks: Sequence[str],
+    model_name: str,
+    api_key: str,
+    base_url: str | None,
+    temperature: float,
+    max_new_tokens: int,
+) -> tuple[str, list[str], list[str]]:
+    true_statement_item = _require_non_empty(true_statement, "true_statement")
+    false_statement_items = list(false_statements)
+    if len(false_statement_items) != 3:
+        raise ValueError("false_statements must contain exactly three statements")
+    for index, statement in enumerate(false_statement_items):
+        if not statement.strip():
+            raise ValueError(f"false_statements[{index}] must not be empty")
+    false_statement_items = [statement.strip() for statement in false_statement_items]
+    if len(set(false_statement_items)) != 3:
+        raise ValueError("false_statements must be distinct")
+    if true_statement_item in false_statement_items:
+        raise ValueError("false_statements must not contain true_statement")
+    relevant_chunk_items = list(relevant_chunks)
+    if not relevant_chunk_items:
+        raise ValueError("relevant_chunks must not be empty")
+    for index, chunk in enumerate(relevant_chunk_items):
+        if not chunk.strip():
+            raise ValueError(f"relevant_chunks[{index}] must not be empty")
+    relevant_chunk_items = [chunk.strip() for chunk in relevant_chunk_items]
+    _validate_api_credentials(model_name, api_key, base_url, allow_empty_base_url=False)
+    _validate_generation_limits(temperature, max_new_tokens, allow_zero_temperature=True)
+    return true_statement_item, false_statement_items, relevant_chunk_items
 
 
 def evaluate_information_preservation(
@@ -258,87 +394,48 @@ def evaluate_information_preservation(
     seed: int | None = None,
     max_regenerations: int = 0,
 ) -> int:
-    """Run one HOPE Information Preservation multiple-choice evaluation.
-
-    Args:
-        true_statement: One non-empty statement known to be true.
-        false_statements: Exactly three distinct non-empty false statements. None may equal the
-            true statement.
-        relevant_chunks: Non-empty chunks retrieved as evidence for the true statement.
-        model_name: OpenAI-compatible chat model identifier.
-        api_key: API key passed to the OpenAI-compatible client.
-        base_url: Optional OpenAI-compatible API base URL.
-        prompt: User-message format string containing ``{statements}`` and
-            ``{relevant_chunks}``. Both values are inserted as JSON.
-        temperature: Non-negative generation temperature.
-        max_new_tokens: Maximum number of tokens available for the JSON response.
-        seed: Optional seed used only to shuffle the four statements reproducibly.
-        max_regenerations: Additional attempts allowed after an invalid model response.
-
-    Returns:
-        ``1`` when the model selects the true statement, otherwise ``0``.
-
-    Raises:
-        TypeError: If an argument has an invalid type.
-        ValueError: If an argument or the model response violates the required contract.
-
-    Statements are shuffled once and keep the same indices across regenerations. Callers are
-    responsible for averaging the results of multiple independently generated tests.
-    """
-    utils._validate_max_regenerations(max_regenerations)
-    true_statement_item, false_statement_items, relevant_chunk_items = (
-        utils._validate_information_preservation_evaluation_arguments(
-            true_statement,
-            false_statements,
-            relevant_chunks,
-            model_name,
-            api_key,
-            base_url,
-            prompt,
-            temperature,
-            max_new_tokens,
-            seed,
-        )
+    """Run one shuffled HOPE Information Preservation evaluation through an API."""
+    _validate_max_regenerations(max_regenerations)
+    true_item, false_items, chunk_items = _validate_evaluation_inputs(
+        true_statement,
+        false_statements,
+        relevant_chunks,
+        model_name,
+        api_key,
+        base_url,
+        temperature,
+        max_new_tokens,
     )
-    statements = [
-        (true_statement_item, True),
-        *((statement, False) for statement in false_statement_items),
-    ]
+    statements = [(true_item, True), *((statement, False) for statement in false_items)]
     random.Random(seed).shuffle(statements)
-    true_statement_index = next(
-        index for index, (_, is_true) in enumerate(statements, start=1) if is_true
-    )
-    messages = utils._information_preservation_evaluation_messages(
-        [statement for statement, _ in statements],
-        relevant_chunk_items,
+    true_index = next(index for index, (_, is_true) in enumerate(statements, 1) if is_true)
+    messages = _build_messages(
+        DEFAULT_INFORMATION_PRESERVATION_EVALUATION_SYSTEM_PROMPT,
         prompt,
+        {
+            "statements": [
+                {"index": index, "statement": statement}
+                for index, (statement, _) in enumerate(statements, 1)
+            ],
+            "relevant_chunks": chunk_items,
+        },
     )
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    def generate(attempt_messages: list[dict[str, str]]) -> object:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=attempt_messages,
-            stream=False,
-            extra_body={"thinking": {"type": "disabled"}},
-            response_format={"type": "json_object"},
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-
-    selected_index = utils._generate_with_validation(
+    response = _generate_validated(
+        OpenAI(api_key=api_key, base_url=base_url),
         messages,
-        generate,
-        utils._parse_information_preservation_evaluation_response,
+        _InformationPreservationEvaluationResponse,
+        None,
+        model_name=model_name,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
         max_regenerations=max_regenerations,
         contract="a JSON object containing only integer selected_index from 1 to 4",
         error_message=(
             "model response must be a JSON object containing only selected_index from 1 to 4"
         ),
+        json_response=True,
     )
-    return int(selected_index == true_statement_index)
+    return int(response.selected_index == true_index)
 
 
 def generate_questions(
@@ -353,59 +450,36 @@ def generate_questions(
     max_new_tokens: int = 256,
     max_regenerations: int = 0,
 ) -> list[str]:
-    """Generate questions answerable from one text chunk with a causal chat model.
-
-    Args:
-        chunk: Source text from which the questions are generated.
-        model_name: Hugging Face causal language model identifier or local model path. Its
-            tokenizer must define a chat template.
-        prompt: Format string used for the user message. It must contain ``{chunk}`` and
-            ``{question_count}`` placeholders. Escape literal braces by doubling them.
-        question_count: Exact number of questions required in the model response.
-        temperature: Positive non-zero sampling temperature used to encourage question diversity.
-        max_new_tokens: Maximum number of tokens available for the JSON response.
-        max_regenerations: Additional attempts allowed after an invalid model response.
-        device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
-            CUDA is preferred, followed by MPS and CPU.
-
-    Returns:
-        A list containing exactly ``question_count`` non-empty questions.
-
-    Raises:
-        TypeError: If an argument has an invalid type.
-        ValueError: If an argument is invalid, the prompt and response budget do not fit the
-            context window, the tokenizer has no chat template, or the model response is not a
-            JSON array containing exactly the requested number of non-empty strings.
-
-    Generation is stochastic. The chunk is never truncated.
-    """
-
-    utils._validate_max_regenerations(max_regenerations)
-    messages = utils._question_messages(chunk, question_count, prompt)
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    def generate(attempt_messages: list[dict[str, str]]) -> object:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=attempt_messages,
-            stream=False,
-            # reasoning_effort="low",
-            extra_body={"thinking": {"type": "disabled"}},
-            response_format={"type": "json_object"},
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-
-    error_message = (
-        f"model response must be a JSON array of exactly {question_count} non-empty strings"
+    """Generate a strict JSON list of answerable questions through an API."""
+    _validate_max_regenerations(max_regenerations)
+    _validate_list_generation_inputs(
+        chunk,
+        model_name,
+        api_key,
+        base_url,
+        question_count,
+        "question_count",
+        temperature,
+        max_new_tokens,
     )
-    return utils._generate_with_validation(
+    messages = _build_messages(
+        DEFAULT_QUESTION_SYSTEM_PROMPT,
+        prompt,
+        {"chunk": chunk, "question_count": question_count},
+    )
+    response = _generate_validated(
+        OpenAI(api_key=api_key, base_url=base_url),
         messages,
-        generate,
-        lambda response: utils._parse_question_response(response, question_count),
+        _StringListResponse,
+        {"expected_count": question_count},
+        model_name=model_name,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
         max_regenerations=max_regenerations,
         contract=f"a JSON array of exactly {question_count} non-empty strings",
-        error_message=error_message,
+        error_message=(
+            f"model response must be a JSON array of exactly {question_count} non-empty strings"
+        ),
+        json_response=True,
     )
+    return response.root

@@ -220,7 +220,8 @@ from chunking_metrics import metrics, preparations, prompts
 | `evaluate_information_preservation(true_statement: str, false_statements: Sequence[str], relevant_chunks: Sequence[str], model_name: str, api_key: str, base_url: str \| None = None, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT, temperature: float = 0.0, max_new_tokens: int = 32, seed: int \| None = None, max_regenerations: int = 0) -> int` | Score one retrieved multiple-choice test as `0` or `1` |
 | `generate_questions(chunk: str, model_name: str = "", api_key: str = "", base_url: str = "", *, prompt: str = DEFAULT_QUESTION_PROMPT, question_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256, max_regenerations: int = 0) -> list[str]` | Generate questions through an OpenAI-compatible API |
 
-All generation results are validated strictly with Pydantic before being returned. Set
+All LLM generation results are validated strictly with internal Pydantic response schemas before
+being returned. Pydantic is not used to validate public Python arguments. Set
 `max_regenerations` to a non-negative number of additional attempts after an invalid result; its
 default of `0` preserves one model call per operation (or per question for `generate_answers`).
 
@@ -282,13 +283,15 @@ Values are serialized into prompts as JSON. Escape literal braces in a custom fo
 - Embedding inputs over the model limit are truncated after a warning. Perplexity discards the
   oldest context tokens when necessary but rejects a target that cannot fit.
 - Local statement and question generation require a tokenizer chat template. Generation helpers
-  make no retries, and local prompts are not truncated.
+  retry only responses that fail their LLM response schema, and local prompts are not truncated.
 - API helpers use OpenAI-compatible Chat Completions, Completions, and Embeddings endpoints.
   API perplexity specifically targets vLLM and requires echoed prompt token log-probabilities.
   Supply an explicit provider model and API key; set a base URL for non-OpenAI providers. Callers
   own provider errors, retries, rate limits, context-window overflow, and costs.
-- Preparation helpers raise `TypeError` or `ValueError` for invalid inputs. Metric functions
-  generally return `0.0` for invalid shapes or values that they explicitly validate.
+- Preparation helpers validate documented semantic preconditions such as non-empty required data,
+  numeric limits, matching nested-list lengths, and required prompt placeholders. They do not
+  promise a separate error for every value whose Python type contradicts its annotation. Metric
+  functions generally return `0.0` for invalid shapes or values that they explicitly validate.
 
 ## Development
 

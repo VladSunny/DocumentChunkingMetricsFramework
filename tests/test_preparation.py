@@ -5,7 +5,6 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from pydantic import ValidationError
 
 import chunking_metrics.prompts as prompts
 from chunking_metrics.preparations import api, local
@@ -203,15 +202,10 @@ def test_api_calculate_perplexity_scores_only_normalized_conditional_target(
 @pytest.mark.parametrize(
     ("argument", "value", "error_type", "message"),
     [
-        ("text", 1, TypeError, "text must be a string"),
         ("text", " \t", ValueError, "text must not be empty"),
-        ("model_name", 1, TypeError, "model_name must be a string"),
         ("model_name", " ", ValueError, "model_name must not be empty"),
-        ("api_key", 1, TypeError, "api_key must be a string"),
         ("api_key", " ", ValueError, "api_key must not be empty"),
-        ("base_url", 1, TypeError, "base_url must be a string or None"),
         ("base_url", " ", ValueError, "base_url must not be empty"),
-        ("context", 1, TypeError, "context must be a string or None"),
         ("context", " \t", ValueError, "context must not be empty"),
     ],
 )
@@ -393,21 +387,12 @@ def test_api_calculate_embeddings_batches_and_restores_global_input_order(
 @pytest.mark.parametrize(
     ("argument", "value", "error_type", "message"),
     [
-        ("texts", 1, TypeError, "texts must be a string or a sequence of strings"),
-        ("texts", ["valid", 1], TypeError, r"texts\[1\] must be a string"),
         ("texts", [], ValueError, "texts must not be empty"),
         ("texts", ["  "], ValueError, r"texts\[0\] must not be empty"),
-        ("model_name", 1, TypeError, "model_name must be a string"),
         ("model_name", "  ", ValueError, "model_name must not be empty"),
-        ("api_key", 1, TypeError, "api_key must be a string"),
         ("api_key", "  ", ValueError, "api_key must not be empty"),
-        ("base_url", 1, TypeError, "base_url must be a string or None"),
         ("base_url", "  ", ValueError, "base_url must not be empty"),
-        ("dimensions", 1.5, TypeError, "dimensions must be an integer or None"),
-        ("dimensions", True, TypeError, "dimensions must be an integer or None"),
         ("dimensions", 0, ValueError, "dimensions must be greater than zero"),
-        ("batch_size", 1.5, TypeError, "batch_size must be an integer"),
-        ("batch_size", True, TypeError, "batch_size must be an integer"),
         ("batch_size", 0, ValueError, "batch_size must be between 1 and 2048"),
         ("batch_size", 2049, ValueError, "batch_size must be between 1 and 2048"),
     ],
@@ -776,46 +761,6 @@ def test_generate_statements_formats_custom_prompt(
 
 
 @pytest.mark.parametrize(
-    ("argument", "value", "message"),
-    [
-        ("chunk", 123, "chunk must be a string"),
-        ("model_name", 123, "model_name must be a string"),
-        ("prompt", 123, "prompt must be a string"),
-        ("statement_count", 1.5, "statement_count must be an integer"),
-        ("statement_count", True, "statement_count must be an integer"),
-        ("temperature", "hot", "temperature must be a number"),
-        ("temperature", True, "temperature must be a number"),
-        ("max_new_tokens", 1.5, "max_new_tokens must be an integer"),
-        ("max_new_tokens", True, "max_new_tokens must be an integer"),
-        ("device", 123, "device must be a string or None"),
-    ],
-)
-def test_generate_statements_rejects_invalid_argument_types_before_loading_model(
-    monkeypatch: pytest.MonkeyPatch,
-    argument: str,
-    value: object,
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        local_generation,
-        "_load_model_and_tokenizer",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
-    )
-    arguments: dict[str, object] = {
-        "chunk": "Текст чанка.",
-        "model_name": "model",
-        "statement_count": 2,
-        "temperature": 0.5,
-        "max_new_tokens": 8,
-        "device": "cpu",
-        argument: value,
-    }
-
-    with pytest.raises(TypeError, match=message):
-        local.generate_statements(**arguments)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
     ("arguments", "message"),
     [
         ({"chunk": "  "}, "chunk must not be empty"),
@@ -1156,18 +1101,6 @@ def test_local_evaluate_information_preservation_returns_zero_and_repeats_seeded
     [
         (
             "generate_information_preservation_statements",
-            {"segment": 1},
-            TypeError,
-            "segment must be a string",
-        ),
-        (
-            "generate_information_preservation_statements",
-            {"segment": "Segment.", "device": 1},
-            TypeError,
-            "device must be a string or None",
-        ),
-        (
-            "generate_information_preservation_statements",
             {"segment": "  "},
             ValueError,
             "segment must not be empty",
@@ -1231,17 +1164,6 @@ def test_local_evaluate_information_preservation_returns_zero_and_repeats_seeded
             },
             ValueError,
             "temperature must be greater than or equal to zero",
-        ),
-        (
-            "evaluate_information_preservation",
-            {
-                "true_statement": "True.",
-                "false_statements": ["F1.", "F2.", "F3."],
-                "relevant_chunks": ["Chunk."],
-                "device": 1,
-            },
-            TypeError,
-            "device must be a string or None",
         ),
     ],
 )
@@ -1395,13 +1317,6 @@ def test_generate_information_preservation_statements_rejects_invalid_response(
 @pytest.mark.parametrize(
     ("argument", "value", "error_type", "message"),
     [
-        ("segment", 1, TypeError, "segment must be a string"),
-        ("model_name", 1, TypeError, "model_name must be a string"),
-        ("api_key", 1, TypeError, "api_key must be a string"),
-        ("base_url", 1, TypeError, "base_url must be a string or None"),
-        ("prompt", 1, TypeError, "prompt must be a string"),
-        ("temperature", True, TypeError, "temperature must be a number"),
-        ("max_new_tokens", True, TypeError, "max_new_tokens must be an integer"),
         ("segment", "  ", ValueError, "segment must not be empty"),
         ("model_name", "  ", ValueError, "model_name must not be empty"),
         ("api_key", "  ", ValueError, "api_key must not be empty"),
@@ -1572,48 +1487,6 @@ def test_evaluate_information_preservation_repeats_order_for_same_seed(
     api.evaluate_information_preservation(**arguments)
 
     assert user_messages[0] == user_messages[1]
-
-
-@pytest.mark.parametrize(
-    ("argument", "value", "message"),
-    [
-        ("true_statement", 1, "true_statement must be a string"),
-        ("false_statements", "false", "false_statements must be a sequence of strings"),
-        ("false_statements", ["F1.", 2, "F3."], r"false_statements\[1\] must be a string"),
-        ("relevant_chunks", "chunk", "relevant_chunks must be a sequence of strings"),
-        ("relevant_chunks", [1], r"relevant_chunks\[0\] must be a string"),
-        ("model_name", 1, "model_name must be a string"),
-        ("api_key", 1, "api_key must be a string"),
-        ("base_url", 1, "base_url must be a string or None"),
-        ("prompt", 1, "prompt must be a string"),
-        ("temperature", True, "temperature must be a number"),
-        ("max_new_tokens", True, "max_new_tokens must be an integer"),
-        ("seed", True, "seed must be an integer or None"),
-        ("seed", 1.5, "seed must be an integer or None"),
-    ],
-)
-def test_evaluate_information_preservation_rejects_invalid_types_before_client(
-    monkeypatch: pytest.MonkeyPatch,
-    argument: str,
-    value: object,
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        api_generation,
-        "OpenAI",
-        lambda **kwargs: pytest.fail("client must not be created"),
-    )
-    arguments: dict[str, object] = {
-        "true_statement": "True.",
-        "false_statements": ["F1.", "F2.", "F3."],
-        "relevant_chunks": ["Chunk."],
-        "model_name": "model",
-        "api_key": "secret",
-        argument: value,
-    }
-
-    with pytest.raises(TypeError, match=message):
-        api.evaluate_information_preservation(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -1790,46 +1663,6 @@ def test_generate_questions_formats_custom_prompt(monkeypatch: pytest.MonkeyPatc
         "role": "user",
         "content": 'Create 2 questions from "Текст чанка.".',
     }
-
-
-@pytest.mark.parametrize(
-    ("argument", "value", "message"),
-    [
-        ("chunk", 123, "chunk must be a string"),
-        ("model_name", 123, "model_name must be a string"),
-        ("prompt", 123, "prompt must be a string"),
-        ("question_count", 1.5, "question_count must be an integer"),
-        ("question_count", True, "question_count must be an integer"),
-        ("temperature", "hot", "temperature must be a number"),
-        ("temperature", True, "temperature must be a number"),
-        ("max_new_tokens", 1.5, "max_new_tokens must be an integer"),
-        ("max_new_tokens", True, "max_new_tokens must be an integer"),
-        ("device", 123, "device must be a string or None"),
-    ],
-)
-def test_generate_questions_rejects_invalid_argument_types_before_loading_model(
-    monkeypatch: pytest.MonkeyPatch,
-    argument: str,
-    value: object,
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        local_generation,
-        "_load_model_and_tokenizer",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
-    )
-    arguments: dict[str, object] = {
-        "chunk": "Текст чанка.",
-        "model_name": "model",
-        "question_count": 2,
-        "temperature": 0.5,
-        "max_new_tokens": 8,
-        "device": "cpu",
-        argument: value,
-    }
-
-    with pytest.raises(TypeError, match=message):
-        local.generate_questions(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -2106,58 +1939,6 @@ def test_generate_answers_creates_one_client_and_calls_once_per_question(
 
 
 @pytest.mark.parametrize(
-    ("argument", "value", "message"),
-    [
-        ("questions", "not-a-sequence", "questions must be a sequence of strings"),
-        ("questions", ["Вопрос?", 1], r"questions\[1\] must be a string"),
-        ("chunk", 1, "chunk must be a string"),
-        ("model_name", 1, "model_name must be a string"),
-        ("prompt", 1, "prompt must be a string"),
-        ("temperature", True, "temperature must be a number"),
-        ("max_new_tokens", True, "max_new_tokens must be an integer"),
-        ("device", 1, "device must be a string or None"),
-        (
-            "additional_chunks_by_question",
-            "context",
-            "additional_chunks_by_question must be a sequence of string sequences or None",
-        ),
-        (
-            "additional_chunks_by_question",
-            [["Контекст."], "context"],
-            r"additional_chunks_by_question\[1\] must be a sequence of strings",
-        ),
-        (
-            "additional_chunks_by_question",
-            [["Контекст."], [1]],
-            r"additional_chunks_by_question\[1\]\[0\] must be a string",
-        ),
-    ],
-)
-def test_generate_answers_rejects_invalid_argument_types_before_loading_model(
-    monkeypatch: pytest.MonkeyPatch,
-    argument: str,
-    value: object,
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        local_generation,
-        "_load_model_and_tokenizer",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
-    )
-    arguments: dict[str, object] = {
-        "questions": ["Первый?", "Второй?"],
-        "chunk": "Чанк.",
-        "model_name": "model",
-        "max_new_tokens": 4,
-        "device": "cpu",
-        argument: value,
-    }
-
-    with pytest.raises(TypeError, match=message):
-        local.generate_answers(**arguments)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
     ("arguments", "message"),
     [
         ({"questions": []}, "questions must not be empty"),
@@ -2291,8 +2072,6 @@ def test_generate_answers_rejects_empty_message_content(
 @pytest.mark.parametrize(
     ("argument", "value", "error_type", "message"),
     [
-        ("api_key", 1, TypeError, "api_key must be a string"),
-        ("base_url", 1, TypeError, "base_url must be a string or None"),
         ("api_key", "  ", ValueError, "api_key must not be empty"),
         ("base_url", "  ", ValueError, "base_url must not be empty"),
     ],
@@ -2320,6 +2099,73 @@ def test_generate_answers_rejects_invalid_client_arguments_before_creating_clien
 
     with pytest.raises(error_type, match=message):
         api.generate_answers(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("function_name", "arguments", "message"),
+    [
+        (
+            "generate_statements",
+            {"chunk": "", "model_name": "model", "api_key": "secret"},
+            "chunk",
+        ),
+        (
+            "generate_statements",
+            {"chunk": "Chunk.", "model_name": "", "api_key": "secret"},
+            "model_name",
+        ),
+        (
+            "generate_questions",
+            {"chunk": "Chunk.", "model_name": "model", "api_key": ""},
+            "api_key",
+        ),
+        (
+            "generate_questions",
+            {
+                "chunk": "Chunk.",
+                "model_name": "model",
+                "api_key": "secret",
+                "question_count": 0,
+            },
+            "question_count",
+        ),
+        (
+            "generate_statements",
+            {
+                "chunk": "Chunk.",
+                "model_name": "model",
+                "api_key": "secret",
+                "prompt": "Only {chunk}.",
+            },
+            "prompt",
+        ),
+        (
+            "generate_answers",
+            {
+                "questions": ["Question?"],
+                "chunk": "Chunk.",
+                "model_name": "model",
+                "api_key": "secret",
+                "prompt": "Only {question}.",
+            },
+            "prompt",
+        ),
+    ],
+)
+def test_api_generation_rejects_semantic_input_errors_before_creating_client(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        api_generation,
+        "OpenAI",
+        lambda **kwargs: pytest.fail("client must not be created"),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        getattr(api, function_name)(**arguments)
 
 
 @pytest.mark.parametrize("invalid_value", [-1, True, 1.5])
@@ -2454,7 +2300,7 @@ def test_api_generate_statements_regenerates_from_only_latest_invalid_response(
     assert "exactly 2 non-empty strings" in retry_messages[-1]["content"]  # type: ignore[index]
 
 
-def test_local_generate_questions_exhausts_regenerations_and_chains_last_validation_error(
+def test_local_generate_questions_exhausts_regenerations_after_latest_invalid_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     responses = iter(["not JSON", '["Only one?"]', '["First?", 2]'])
@@ -2466,7 +2312,7 @@ def test_local_generate_questions_exhausts_regenerations_and_chains_last_validat
 
     monkeypatch.setattr(local_generation, "_generate_text", generate)
 
-    with pytest.raises(ValueError, match="exactly 2 non-empty strings") as raised:
+    with pytest.raises(ValueError, match="exactly 2 non-empty strings"):
         local.generate_questions(
             "Chunk.", model_name="model", question_count=2, max_regenerations=2
         )
@@ -2476,7 +2322,6 @@ def test_local_generate_questions_exhausts_regenerations_and_chains_last_validat
     assert calls[1][-2]["content"] == "not JSON"
     assert calls[2][:-2] == calls[0]
     assert calls[2][-2]["content"] == '["Only one?"]'
-    assert isinstance(raised.value.__cause__, ValidationError)
 
 
 def test_api_generate_answers_applies_regeneration_limit_per_question(
@@ -2524,12 +2369,10 @@ def test_local_generate_answers_reports_exhausted_question_index(
         lambda *args, **kwargs: next(responses),
     )
 
-    with pytest.raises(ValueError, match=r"answer for question 1 must not be empty") as raised:
+    with pytest.raises(ValueError, match=r"answer for question 1 must not be empty"):
         local.generate_answers(
             ["First?", "Second?"], "Chunk.", model_name="model", max_regenerations=1
         )
-
-    assert isinstance(raised.value.__cause__, ValidationError)
 
 
 def test_api_evaluation_reuses_shuffled_options_when_regenerating(
@@ -2668,40 +2511,6 @@ def test_calculate_embeddings_rejects_empty_text_sequence(
 
     with pytest.raises(ValueError, match="texts must not be empty"):
         local.calculate_embeddings([], device="cpu")
-
-
-@pytest.mark.parametrize(
-    ("argument", "value", "message"),
-    [
-        ("texts", 123, "texts must be a string or a sequence of strings"),
-        ("texts", ["text", 123], r"texts\[1\] must be a string"),
-        ("model_name", 123, "model_name must be a string"),
-        ("device", 123, "device must be a string or None"),
-        ("batch_size", 1.5, "batch_size must be an integer"),
-        ("batch_size", True, "batch_size must be an integer"),
-    ],
-)
-def test_calculate_embeddings_rejects_invalid_argument_types(
-    monkeypatch: pytest.MonkeyPatch,
-    argument: str,
-    value: object,
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        local_calculation,
-        "_load_embedding_model",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
-    )
-    arguments: dict[str, object] = {
-        "texts": "text",
-        "model_name": "model",
-        "device": "cpu",
-        "batch_size": 4,
-        argument: value,
-    }
-
-    with pytest.raises(TypeError, match=message):
-        local.calculate_embeddings(**arguments)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -2848,49 +2657,6 @@ def test_retrieve_relevant_chunks_returns_all_candidates_and_preserves_tie_order
 
 
 @pytest.mark.parametrize(
-    ("argument", "value", "error_type", "message"),
-    [
-        ("queries", "query", TypeError, "queries must be a sequence of strings"),
-        ("queries", ["query", 1], TypeError, r"queries\[1\] must be a string"),
-        (
-            "candidate_chunks",
-            "chunk",
-            TypeError,
-            "candidate_chunks must be a sequence of strings",
-        ),
-        (
-            "candidate_chunks",
-            ["chunk", 1],
-            TypeError,
-            r"candidate_chunks\[1\] must be a string",
-        ),
-        ("top_k", 1.5, TypeError, "top_k must be an integer"),
-        ("top_k", True, TypeError, "top_k must be an integer"),
-    ],
-)
-def test_retrieve_relevant_chunks_rejects_invalid_argument_types_before_embedding(
-    monkeypatch: pytest.MonkeyPatch,
-    argument: str,
-    value: object,
-    error_type: type[Exception],
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        local_calculation,
-        "calculate_embeddings",
-        lambda *args, **kwargs: pytest.fail("embeddings must not be calculated"),
-    )
-    arguments: dict[str, object] = {
-        "queries": ["query"],
-        "candidate_chunks": ["chunk"],
-        argument: value,
-    }
-
-    with pytest.raises(error_type, match=message):
-        local.retrieve_relevant_chunks(**arguments)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
     ("argument", "value", "message"),
     [
         ("queries", [], "queries must not be empty"),
@@ -2964,26 +2730,6 @@ def test_calculate_perplexity_rejects_target_larger_than_model_window(
 
     with pytest.raises(ValueError, match="target requires 5 tokens"):
         calculate_perplexity("abc", device="cpu")
-
-
-@pytest.mark.parametrize(
-    ("argument", "value", "message"),
-    [
-        ("text", 123, "text must be a string"),
-        ("model_name", 123, "model_name must be a string"),
-        ("context", 123, "context must be a string or None"),
-        ("device", 123, "device must be a string or None"),
-    ],
-)
-def test_calculate_perplexity_rejects_invalid_argument_types(
-    argument: str,
-    value: object,
-    message: str,
-) -> None:
-    arguments: dict[str, object] = {"text": "text", argument: value}
-
-    with pytest.raises(TypeError, match=message):
-        calculate_perplexity(**arguments)  # type: ignore[arg-type]
 
 
 def test_calculate_perplexity_rejects_empty_model_name() -> None:

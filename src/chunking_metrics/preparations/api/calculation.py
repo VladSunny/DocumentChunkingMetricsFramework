@@ -27,7 +27,6 @@ def calculate_perplexity(
         The exponentiated mean negative log-probability of the target tokens.
 
     Raises:
-        TypeError: If an argument has an invalid type.
         ValueError: If an argument is empty or the API response does not provide consistent,
             finite prompt token log-probabilities and character offsets.
 
@@ -35,16 +34,6 @@ def calculate_perplexity(
     echoed prompt log-probabilities in ``text_offset`` and ``token_logprobs``. Provider errors,
     including context-window overflow, are propagated without retries or truncation.
     """
-    if not isinstance(text, str):
-        raise TypeError("text must be a string")
-    if not isinstance(model_name, str):
-        raise TypeError("model_name must be a string")
-    if not isinstance(api_key, str):
-        raise TypeError("api_key must be a string")
-    if base_url is not None and not isinstance(base_url, str):
-        raise TypeError("base_url must be a string or None")
-    if context is not None and not isinstance(context, str):
-        raise TypeError("context must be a string or None")
     if not text.strip():
         raise ValueError("text must not be empty")
     if not model_name.strip():
@@ -145,28 +134,17 @@ def calculate_embeddings(
         matrix of shape ``(text_count, embedding_dim)`` for a sequence.
 
     Raises:
-        TypeError: If an argument has an invalid type.
         ValueError: If an argument or API response violates the required contract.
 
     One client is reused for sequential batches. Provider errors are not caught, requests are
     not retried, and no partial result is returned.
     """
-    if not isinstance(texts, (str, Sequence)):
-        raise TypeError("texts must be a string or a sequence of strings")
     text_items = [texts] if isinstance(texts, str) else list(texts)
     if not text_items:
         raise ValueError("texts must not be empty")
     for index, text in enumerate(text_items):
-        if not isinstance(text, str):
-            raise TypeError(f"texts[{index}] must be a string")
         if not text.strip():
             raise ValueError(f"texts[{index}] must not be empty")
-    if not isinstance(model_name, str):
-        raise TypeError("model_name must be a string")
-    if not isinstance(api_key, str):
-        raise TypeError("api_key must be a string")
-    if base_url is not None and not isinstance(base_url, str):
-        raise TypeError("base_url must be a string or None")
     if dimensions is not None and (not isinstance(dimensions, int) or isinstance(dimensions, bool)):
         raise TypeError("dimensions must be an integer or None")
     if not isinstance(batch_size, int) or isinstance(batch_size, bool):

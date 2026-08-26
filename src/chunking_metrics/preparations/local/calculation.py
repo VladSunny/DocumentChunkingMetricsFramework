@@ -8,8 +8,6 @@ import torch
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ... import utils
-
 DEFAULT_EMBEDDING_MODEL = "cointegrated/rubert-tiny2"
 DEFAULT_PERPLEXITY_MODEL = "ai-forever/rugpt3small_based_on_gpt2"
 
@@ -126,14 +124,16 @@ def calculate_perplexity(
         The exponentiated mean negative log-likelihood of the target tokens.
 
     Raises:
-        TypeError: If an argument has an invalid type.
         ValueError: If an argument is empty, the model is incompatible, or the target
             does not fit within the model context window.
 
     The boundary between context and target is normalized to one space. If the combined
     sequence is too long, the oldest context tokens are discarded and a warning is emitted.
     """
-    utils._validate_arguments(text, model_name, context, device)
+    if not text.strip():
+        raise ValueError("text must not be empty")
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
     resolved_device = _resolve_device(device)
     tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
 
@@ -197,13 +197,23 @@ def calculate_embeddings(
         of shape ``(text_count, embedding_dim)`` for a sequence. Every vector is L2-normalized.
 
     Raises:
-        TypeError: If an argument has an invalid type.
         ValueError: If an argument is empty or ``batch_size`` is not positive.
 
     Texts longer than the model's maximum sequence length are truncated by Sentence
     Transformers after this function emits a warning.
     """
-    text_items = utils._validate_embedding_arguments(texts, model_name, device, batch_size)
+    text_items = [texts] if isinstance(texts, str) else list(texts)
+    if not text_items:
+        raise ValueError("texts must not be empty")
+    for index, text in enumerate(text_items):
+        if not text.strip():
+            raise ValueError(f"texts[{index}] must not be empty")
+    if not model_name.strip():
+        raise ValueError("model_name must not be empty")
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool):
+        raise TypeError("batch_size must be an integer")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
     resolved_device = _resolve_device(device)
     model = _load_embedding_model(model_name.strip(), resolved_device)
     _warn_about_embedding_truncation(text_items, model)
@@ -245,17 +255,12 @@ def retrieve_relevant_chunks(
         Equal similarities preserve the original candidate order.
 
     Raises:
-        TypeError: If an argument has an invalid type.
         ValueError: If a sequence or string is empty, or a numeric argument is not positive.
 
     Query and candidate embeddings are calculated together in one model call. Callers are
     responsible for excluding a primary chunk when HOPE Semantic Independence requires retrieval
     only from the other chunks in the document.
     """
-    if isinstance(queries, (str, bytes)) or not isinstance(queries, Sequence):
-        raise TypeError("queries must be a sequence of strings")
-    if isinstance(candidate_chunks, (str, bytes)) or not isinstance(candidate_chunks, Sequence):
-        raise TypeError("candidate_chunks must be a sequence of strings")
     if not isinstance(top_k, int) or isinstance(top_k, bool):
         raise TypeError("top_k must be an integer")
 
@@ -266,13 +271,9 @@ def retrieve_relevant_chunks(
     if not candidate_items:
         raise ValueError("candidate_chunks must not be empty")
     for index, query in enumerate(query_items):
-        if not isinstance(query, str):
-            raise TypeError(f"queries[{index}] must be a string")
         if not query.strip():
             raise ValueError(f"queries[{index}] must not be empty")
     for index, candidate_chunk in enumerate(candidate_items):
-        if not isinstance(candidate_chunk, str):
-            raise TypeError(f"candidate_chunks[{index}] must be a string")
         if not candidate_chunk.strip():
             raise ValueError(f"candidate_chunks[{index}] must not be empty")
     if top_k <= 0:
