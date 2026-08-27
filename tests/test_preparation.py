@@ -579,10 +579,10 @@ def test_generate_text_selects_decoding_mode_and_decodes_only_new_tokens(
 ) -> None:
     tokenizer = FakeStatementTokenizer(" Ответ. ")
     model = FakeStatementModel()
-    loads: list[tuple[str, str]] = []
+    loads: list[tuple[str, str | None, str]] = []
 
-    def load_model(model_name: str, device: str) -> tuple[Any, Any, int]:
-        loads.append((model_name, device))
+    def load_model(model_name: str, hf_token: str | None, device: str) -> tuple[Any, Any, int]:
+        loads.append((model_name, hf_token, device))
         return tokenizer, model, 32
 
     monkeypatch.setattr(local_utils, "_load_model_and_tokenizer", load_model)
@@ -590,6 +590,7 @@ def test_generate_text_selects_decoding_mode_and_decodes_only_new_tokens(
     response = local_utils._generate_text(
         [{"role": "user", "content": "Вопрос?"}],
         " model ",
+        hf_token="hf-secret",
         temperature=temperature,
         max_new_tokens=4,
         device="cpu",
@@ -598,7 +599,7 @@ def test_generate_text_selects_decoding_mode_and_decodes_only_new_tokens(
     )
 
     assert response == " Ответ. "
-    assert loads == [("model", "cpu")]
+    assert loads == [("model", "hf-secret", "cpu")]
     assert tokenizer.decoded_ids == [20, 21]
     assert model.generation_arguments is not None
     for name, value in expected_generation_arguments.items():
@@ -616,7 +617,7 @@ def test_generate_text_uses_eos_token_for_padding_when_pad_token_is_missing(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     local_utils._generate_text(
@@ -641,7 +642,7 @@ def test_generate_text_rejects_prompt_and_response_that_exceed_context_window(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 5),
+        lambda model_name, hf_token, device: (tokenizer, model, 5),
     )
 
     with pytest.raises(ValueError, match="custom context overflow"):
@@ -671,7 +672,7 @@ def test_generate_text_reports_custom_error_when_chat_template_is_missing(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match="custom missing template"):
@@ -696,9 +697,63 @@ def install_fake_components(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, max_length),
+        lambda model_name, hf_token, device: (tokenizer, model, max_length),
     )
     return model
+
+
+@pytest.mark.parametrize(
+    ("function_name", "arguments"),
+    [
+        ("generate_statements", {"chunk": "Текст чанка.", "statement_count": 2}),
+        ("generate_questions", {"chunk": "Текст чанка.", "question_count": 2}),
+        (
+            "generate_answers",
+            {"questions": ["Вопрос?"], "chunk": "Чанк.", "temperature": 0.0, "max_new_tokens": 8},
+        ),
+        (
+            "generate_information_preservation_statements",
+            {"segment": "Three sentence segment."},
+        ),
+        (
+            "evaluate_information_preservation",
+            {
+                "true_statement": "True.",
+                "false_statements": ["False 1.", "False 2.", "False 3."],
+                "relevant_chunks": ["Chunk."],
+                "temperature": 0.0,
+            },
+        ),
+    ],
+)
+def test_local_generation_functions_forward_hf_token_to_generate_text(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    arguments: dict[str, object],
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def generate_text(messages: list[dict[str, str]], model_name: str, **kwargs: object) -> str:
+        calls.append({"messages": messages, "model_name": model_name, **kwargs})
+        if function_name == "generate_information_preservation_statements":
+            return (
+                '{"true_statement":" True. ","false_statements":[" False 1. ","False 2.","False 3."]}'
+            )
+        if function_name == "evaluate_information_preservation":
+            return '{"selected_index": 1}'
+        if function_name == "generate_answers":
+            return " Ответ. "
+        return '["Первый.", "Второй."]'
+
+    monkeypatch.setattr(local_utils, "_generate_text", generate_text)
+
+    function = getattr(local, function_name)
+    function(model_name="model", hf_token="hf-secret", device="cpu", **arguments)
+
+    assert len(calls) == 1
+    assert calls[0]["model_name"] == "model"
+    assert calls[0]["hf_token"] == "hf-secret"
+    assert calls[0]["device"] == "cpu"
 
 
 def test_generate_statements_returns_exact_cleaned_json_statements(
@@ -709,7 +764,7 @@ def test_generate_statements_returns_exact_cleaned_json_statements(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     result = local.generate_statements(
@@ -740,7 +795,7 @@ def test_generate_statements_formats_custom_prompt(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     result = local.generate_statements(
@@ -796,7 +851,7 @@ def test_generate_statements_rejects_invalid_argument_values_before_loading_mode
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
+        lambda model_name, hf_token, device: pytest.fail("model must not be loaded"),
     )
     call_arguments: dict[str, object] = {
         "chunk": "Текст чанка.",
@@ -820,7 +875,7 @@ def test_generate_statements_rejects_chunk_that_cannot_fit_without_truncation(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 9),
+        lambda model_name, hf_token, device: (tokenizer, model, 9),
     )
 
     with pytest.raises(ValueError, match="do not fit within the model context window"):
@@ -848,7 +903,7 @@ def test_generate_statements_requires_tokenizer_chat_template(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match="tokenizer must define a chat template"):
@@ -874,7 +929,7 @@ def test_generate_statements_rejects_response_outside_strict_json_contract(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(
@@ -898,7 +953,7 @@ def test_generate_statements_is_available_from_local_module(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     result = local.generate_statements(
@@ -1003,6 +1058,7 @@ def test_local_generate_information_preservation_statements_uses_local_pipeline(
                 {"role": "user", "content": 'Source: "Three sentence segment."'},
             ],
             "model_name": local.DEFAULT_STATEMENT_MODEL,
+            "hf_token": None,
             "temperature": 0.2,
             "max_new_tokens": 128,
             "device": None,
@@ -1060,6 +1116,7 @@ def test_local_evaluate_information_preservation_scores_and_preserves_inputs(
                 },
             ],
             "model_name": local.DEFAULT_STATEMENT_MODEL,
+            "hf_token": None,
             "temperature": 0.2,
             "max_new_tokens": 17,
             "device": "cpu",
@@ -1256,7 +1313,7 @@ def test_local_information_preservation_reports_pipeline_errors(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, FakeStatementModel(), 32),
+        lambda model_name, hf_token, device: (tokenizer, FakeStatementModel(), 32),
     )
     with pytest.raises(ValueError, match=template_error):
         getattr(local, function_name)(**arguments)
@@ -1265,7 +1322,7 @@ def test_local_information_preservation_reports_pipeline_errors(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, FakeStatementModel(), 5),
+        lambda model_name, hf_token, device: (tokenizer, FakeStatementModel(), 5),
     )
     with pytest.raises(ValueError, match=context_error):
         getattr(local, function_name)(**arguments)
@@ -1613,8 +1670,9 @@ def test_generate_questions_returns_exact_cleaned_json_questions(
     tokenizer = FakeStatementTokenizer('[" Первый вопрос? ", "Второй вопрос?"]')
     model = FakeStatementModel()
 
-    def load_model(model_name: str, device: str) -> tuple[Any, Any, int]:
+    def load_model(model_name: str, hf_token: str | None, device: str) -> tuple[Any, Any, int]:
         assert model_name == local.DEFAULT_STATEMENT_MODEL
+        assert hf_token is None
         assert device == "cpu"
         return tokenizer, model, 32
 
@@ -1645,7 +1703,7 @@ def test_generate_questions_formats_custom_prompt(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     result = local.generate_questions(
@@ -1701,7 +1759,7 @@ def test_generate_questions_rejects_invalid_argument_values_before_loading_model
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
+        lambda model_name, hf_token, device: pytest.fail("model must not be loaded"),
     )
     call_arguments: dict[str, object] = {
         "chunk": "Текст чанка.",
@@ -1725,7 +1783,7 @@ def test_generate_questions_rejects_chunk_that_cannot_fit_without_truncation(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 9),
+        lambda model_name, hf_token, device: (tokenizer, model, 9),
     )
 
     with pytest.raises(ValueError, match="do not fit within the model context window"):
@@ -1753,7 +1811,7 @@ def test_generate_questions_requires_tokenizer_chat_template(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match="tokenizer must define a chat template"):
@@ -1779,7 +1837,7 @@ def test_generate_questions_rejects_response_outside_strict_json_contract(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(
@@ -1803,7 +1861,7 @@ def test_generate_questions_is_available_from_local_module(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     result = local.generate_questions(
@@ -1822,10 +1880,10 @@ def test_generate_answers_returns_answers_in_order_with_per_question_context(
 ) -> None:
     tokenizer = FakeAnswerTokenizer([" Первый ответ. ", "Второй ответ."])
     model = FakeAnswerModel()
-    loads: list[tuple[str, str]] = []
+    loads: list[tuple[str, str | None, str]] = []
 
-    def load_model(model_name: str, device: str) -> tuple[Any, Any, int]:
-        loads.append((model_name, device))
+    def load_model(model_name: str, hf_token: str | None, device: str) -> tuple[Any, Any, int]:
+        loads.append((model_name, hf_token, device))
         return tokenizer, model, 32
 
     monkeypatch.setattr(local_utils, "_load_model_and_tokenizer", load_model)
@@ -1841,7 +1899,7 @@ def test_generate_answers_returns_answers_in_order_with_per_question_context(
 
     assert result == ["Первый ответ.", "Второй ответ."]
     assert loads
-    assert set(loads) == {("model", "cpu")}
+    assert set(loads) == {("model", None, "cpu")}
     assert len(model.generation_arguments) == 2
     first_prompt = tokenizer.messages[0][-1]["content"]
     second_prompt = tokenizer.messages[1][-1]["content"]
@@ -1872,7 +1930,7 @@ def test_generate_answers_selects_greedy_or_sampling_decoding(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     result = local.generate_answers(
@@ -1972,7 +2030,7 @@ def test_generate_answers_rejects_invalid_argument_values_before_loading_model(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
+        lambda model_name, hf_token, device: pytest.fail("model must not be loaded"),
     )
     call_arguments: dict[str, object] = {
         "questions": ["Первый?", "Второй?"],
@@ -1996,7 +2054,7 @@ def test_generate_answers_reports_question_index_on_context_overflow(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 10),
+        lambda model_name, hf_token, device: (tokenizer, model, 10),
     )
 
     with pytest.raises(ValueError, match=r"question 1.*model context window"):
@@ -2024,7 +2082,7 @@ def test_generate_answers_requires_tokenizer_chat_template(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match=r"question 0.*tokenizer must define a chat template"):
@@ -2043,7 +2101,7 @@ def test_generate_answers_rejects_empty_answer(
     monkeypatch.setattr(
         local_utils,
         "_load_model_and_tokenizer",
-        lambda model_name, device: (tokenizer, model, 32),
+        lambda model_name, hf_token, device: (tokenizer, model, 32),
     )
 
     with pytest.raises(ValueError, match=r"answer for question 0 must not be empty"):
@@ -2442,7 +2500,7 @@ def test_calculate_embeddings_returns_vector_for_single_text(
     monkeypatch.setattr(
         local_utils,
         "_load_embedding_model",
-        lambda model_name, device: model,
+        lambda model_name, device, hf_token: model,
         raising=False,
     )
 
@@ -2463,7 +2521,7 @@ def test_calculate_embeddings_returns_float32_matrix_for_text_sequence(
     monkeypatch.setattr(
         local_utils,
         "_load_embedding_model",
-        lambda model_name, device: model,
+        lambda model_name, device, hf_token: model,
         raising=False,
     )
 
@@ -2482,20 +2540,27 @@ def test_embedding_model_loader_caches_model_and_enables_eval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = FakeEmbeddingModel()
-    loads: list[tuple[str, str]] = []
+    loads: list[tuple[str, str, str | None]] = []
 
-    def load_model(model_name: str, *, device: str) -> FakeEmbeddingModel:
-        loads.append((model_name, device))
+    def load_model(
+        model_name: str,
+        *,
+        device: str,
+        trust_remote_code: bool,
+        token: str | None,
+    ) -> FakeEmbeddingModel:
+        assert trust_remote_code is True
+        loads.append((model_name, device, token))
         return model
 
     monkeypatch.setattr(local_utils, "SentenceTransformer", load_model, raising=False)
     local_utils._load_embedding_model.cache_clear()
 
-    first = local_utils._load_embedding_model("model", "cpu")
-    second = local_utils._load_embedding_model("model", "cpu")
+    first = local_utils._load_embedding_model("model", "cpu", "hf-secret")
+    second = local_utils._load_embedding_model("model", "cpu", "hf-secret")
 
     assert first is second
-    assert loads == [("model", "cpu")]
+    assert loads == [("model", "cpu", "hf-secret")]
     assert model.is_eval
     local_utils._load_embedding_model.cache_clear()
 
@@ -2506,7 +2571,7 @@ def test_calculate_embeddings_rejects_empty_text_sequence(
     monkeypatch.setattr(
         local_utils,
         "_load_embedding_model",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
+        lambda model_name, device, hf_token: pytest.fail("model must not be loaded"),
     )
 
     with pytest.raises(ValueError, match="texts must not be empty"):
@@ -2531,7 +2596,7 @@ def test_calculate_embeddings_rejects_invalid_argument_values(
     monkeypatch.setattr(
         local_utils,
         "_load_embedding_model",
-        lambda model_name, device: pytest.fail("model must not be loaded"),
+        lambda model_name, device, hf_token: pytest.fail("model must not be loaded"),
     )
 
     with pytest.raises(ValueError, match=message):
@@ -2545,7 +2610,7 @@ def test_calculate_embeddings_warns_when_texts_are_truncated(
     monkeypatch.setattr(
         local_utils,
         "_load_embedding_model",
-        lambda model_name, device: model,
+        lambda model_name, device, hf_token: model,
     )
 
     with pytest.warns(
@@ -2569,7 +2634,7 @@ def test_calculate_embeddings_is_available_from_local_module(
     monkeypatch.setattr(
         local_utils,
         "_load_embedding_model",
-        lambda model_name, device: model,
+        lambda model_name, device, hf_token: model,
     )
 
     result = local.calculate_embeddings(
@@ -2585,16 +2650,17 @@ def test_calculate_embeddings_is_available_from_local_module(
 def test_retrieve_relevant_chunks_ranks_candidates_for_each_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[list[str], str, str | None, int]] = []
+    calls: list[tuple[list[str], str, str | None, int, str | None]] = []
 
     def calculate_embeddings(
         texts: list[str],
         model_name: str,
         *,
+        hf_token: str | None,
         device: str | None,
         batch_size: int,
     ) -> np.ndarray:
-        calls.append((texts, model_name, device, batch_size))
+        calls.append((texts, model_name, device, batch_size, hf_token))
         return np.array(
             [
                 [1.0, 0.0],
@@ -2627,6 +2693,7 @@ def test_retrieve_relevant_chunks_ranks_candidates_for_each_query(
             "model",
             "cpu",
             4,
+            None,
         )
     ]
 
@@ -2710,6 +2777,93 @@ def test_calculate_perplexity_scores_only_normalized_target(
     assert model.labels == [-100, -100, -100, -100, *target_ids]
 
 
+def test_calculate_perplexity_forwards_hf_token_to_model_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeTokenizer(model_max_length=32)
+    model = FakeModel(max_position_embeddings=32)
+    calls: list[tuple[str, str | None, str]] = []
+
+    def load_model(model_name: str, hf_token: str | None, device: str) -> tuple[Any, Any, int]:
+        calls.append((model_name, hf_token, device))
+        return tokenizer, model, 32
+
+    monkeypatch.setattr(local_utils, "_load_model_and_tokenizer", load_model)
+
+    calculate_perplexity("text", model_name="model", hf_token="hf-secret", device="cpu")
+
+    assert calls == [("model", "hf-secret", "cpu")]
+
+
+def test_calculate_embeddings_forwards_hf_token_to_embedding_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel()
+    calls: list[tuple[str, str, str | None]] = []
+
+    def load_model(model_name: str, device: str, hf_token: str | None) -> FakeEmbeddingModel:
+        calls.append((model_name, device, hf_token))
+        return model
+
+    monkeypatch.setattr(local_utils, "_load_embedding_model", load_model, raising=False)
+
+    local.calculate_embeddings(
+        "text",
+        model_name="model",
+        hf_token="hf-secret",
+        device="cpu",
+        batch_size=4,
+    )
+
+    assert calls == [("model", "cpu", "hf-secret")]
+
+
+def test_retrieve_relevant_chunks_forwards_hf_token_to_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def calculate_embeddings(
+        texts: list[str],
+        model_name: str,
+        *,
+        hf_token: str | None,
+        device: str | None,
+        batch_size: int,
+    ) -> np.ndarray:
+        calls.append(
+            {
+                "texts": texts,
+                "model_name": model_name,
+                "hf_token": hf_token,
+                "device": device,
+                "batch_size": batch_size,
+            }
+        )
+        return np.array([[1.0, 0.0], [0.5, 0.5]], dtype=np.float32)
+
+    monkeypatch.setattr(local_calculation, "calculate_embeddings", calculate_embeddings)
+
+    local.retrieve_relevant_chunks(
+        ["query"],
+        ["chunk"],
+        model_name="model",
+        hf_token="hf-secret",
+        device="cpu",
+        batch_size=4,
+    )
+
+    assert calls == [
+        {
+            "texts": ["query", "chunk"],
+            "model_name": "model",
+            "hf_token": "hf-secret",
+            "device": "cpu",
+            "batch_size": 4,
+        }
+    ]
+
+
 def test_calculate_perplexity_warns_when_context_is_truncated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2763,22 +2917,24 @@ def test_model_loader_caches_last_model(monkeypatch: pytest.MonkeyPatch) -> None
     tokenizer_loads = 0
     model_loads = 0
 
-    def load_tokenizer(model_name: str) -> FakeTokenizer:
+    def load_tokenizer(model_name: str, *, token: str | None) -> FakeTokenizer:
         nonlocal tokenizer_loads
         tokenizer_loads += 1
+        assert token == "hf-secret"
         return tokenizer
 
-    def load_model(model_name: str) -> FakeModel:
+    def load_model(model_name: str, *, token: str | None) -> FakeModel:
         nonlocal model_loads
         model_loads += 1
+        assert token == "hf-secret"
         return model
 
     monkeypatch.setattr(local_utils.AutoTokenizer, "from_pretrained", load_tokenizer)
     monkeypatch.setattr(local_utils.AutoModelForCausalLM, "from_pretrained", load_model)
     local_utils._load_model_and_tokenizer.cache_clear()
 
-    first = local_utils._load_model_and_tokenizer("model", "cpu")
-    second = local_utils._load_model_and_tokenizer("model", "cpu")
+    first = local_utils._load_model_and_tokenizer("model", "hf-secret", "cpu")
+    second = local_utils._load_model_and_tokenizer("model", "hf-secret", "cpu")
 
     assert first is second
     assert first[2] == 32

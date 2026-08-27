@@ -30,6 +30,7 @@ def generate_answers(
     chunk: str,
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
+    hf_token: str | None = None,
     additional_chunks_by_question: Sequence[Sequence[str]] | None = None,
     prompt: str = DEFAULT_ANSWER_PROMPT,
     temperature: float = 0.0,
@@ -37,7 +38,11 @@ def generate_answers(
     device: str | None = None,
     max_regenerations: int = 0,
 ) -> list[str]:
-    """Answer questions independently with a local causal chat model."""
+    """Answer questions independently with a local causal chat model.
+
+    Args:
+        hf_token: Optional Hugging Face token used when loading gated local models.
+    """
     utils._validate_max_regenerations(max_regenerations)
     question_items, additional_chunk_items = utils._validate_answer_inputs(
         questions,
@@ -65,6 +70,7 @@ def generate_answers(
             _NonEmptyTextResponse,
             None,
             model_name=model_name,
+            hf_token=hf_token,
             temperature=temperature,
             max_new_tokens=max_new_tokens,
             device=device,
@@ -85,6 +91,7 @@ def generate_statements(
     chunk: str,
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
+    hf_token: str | None = None,
     prompt: str = DEFAULT_STATEMENT_PROMPT,
     statement_count: int = 5,
     temperature: float = 0.7,
@@ -92,7 +99,11 @@ def generate_statements(
     device: str | None = None,
     max_regenerations: int = 0,
 ) -> list[str]:
-    """Generate strict JSON factual statements with a local causal chat model."""
+    """Generate strict JSON factual statements with a local causal chat model.
+
+    Args:
+        hf_token: Optional Hugging Face token used when loading gated local models.
+    """
     utils._validate_max_regenerations(max_regenerations)
     utils._validate_list_generation_inputs(
         chunk,
@@ -112,6 +123,7 @@ def generate_statements(
         _StringListResponse,
         {"expected_count": statement_count},
         model_name=model_name,
+        hf_token=hf_token,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
         device=device,
@@ -133,13 +145,18 @@ def generate_information_preservation_statements(
     segment: str,
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
+    hf_token: str | None = None,
     prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT,
     temperature: float = 0.7,
     max_new_tokens: int = 256,
     device: str | None = None,
     max_regenerations: int = 0,
 ) -> tuple[str, list[str]]:
-    """Generate one true and three distinct false statements locally."""
+    """Generate one true and three distinct false statements locally.
+
+    Args:
+        hf_token: Optional Hugging Face token used when loading gated local models.
+    """
     utils._validate_max_regenerations(max_regenerations)
     utils._require_non_empty(segment, "segment")
     utils._require_non_empty(model_name, "model_name")
@@ -154,6 +171,7 @@ def generate_information_preservation_statements(
         _InformationPreservationResponse,
         None,
         model_name=model_name,
+        hf_token=hf_token,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
         device=device,
@@ -181,6 +199,7 @@ def evaluate_information_preservation(
     relevant_chunks: Sequence[str],
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
+    hf_token: str | None = None,
     prompt: str = DEFAULT_INFORMATION_PRESERVATION_EVALUATION_PROMPT,
     temperature: float = 0.0,
     max_new_tokens: int = 32,
@@ -188,7 +207,11 @@ def evaluate_information_preservation(
     device: str | None = None,
     max_regenerations: int = 0,
 ) -> int:
-    """Run one shuffled local HOPE Information Preservation evaluation."""
+    """Run one shuffled local HOPE Information Preservation evaluation.
+
+    Args:
+        hf_token: Optional Hugging Face token used when loading gated local models.
+    """
     utils._validate_max_regenerations(max_regenerations)
     true_item, false_items, chunk_items = utils._validate_evaluation_inputs(
         true_statement,
@@ -217,6 +240,7 @@ def evaluate_information_preservation(
         _InformationPreservationEvaluationResponse,
         None,
         model_name=model_name,
+        hf_token=hf_token,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
         device=device,
@@ -239,6 +263,7 @@ def generate_questions(
     chunk: str,
     model_name: str = DEFAULT_STATEMENT_MODEL,
     *,
+    hf_token: str | None = None,
     prompt: str = DEFAULT_QUESTION_PROMPT,
     question_count: int = 5,
     temperature: float = 0.7,
@@ -246,7 +271,11 @@ def generate_questions(
     device: str | None = None,
     max_regenerations: int = 0,
 ) -> list[str]:
-    """Generate strict JSON questions with a local causal chat model."""
+    """Generate strict JSON questions with a local causal chat model.
+
+    Args:
+        hf_token: Optional Hugging Face token used when loading gated local models.
+    """
     utils._validate_max_regenerations(max_regenerations)
     utils._validate_list_generation_inputs(
         chunk,
@@ -266,6 +295,7 @@ def generate_questions(
         _StringListResponse,
         {"expected_count": question_count},
         model_name=model_name,
+        hf_token=hf_token,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
         device=device,

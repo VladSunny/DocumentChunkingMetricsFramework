@@ -207,6 +207,7 @@ def _generate_validated(
     validation_context: dict[str, object] | None,
     *,
     model_name: str,
+    hf_token: str | None,
     temperature: float,
     max_new_tokens: int,
     device: str | None,
@@ -222,6 +223,7 @@ def _generate_validated(
         response = _generate_text(
             messages,
             model_name,
+            hf_token=hf_token,
             temperature=temperature,
             max_new_tokens=max_new_tokens,
             device=device,
