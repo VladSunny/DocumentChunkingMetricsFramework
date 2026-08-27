@@ -63,8 +63,8 @@ def _load_model_and_tokenizer(model_name: str, device: str) -> tuple[Any, Any, i
 
 
 @lru_cache(maxsize=1)
-def _load_embedding_model(model_name: str, device: str) -> SentenceTransformer:
-    model = SentenceTransformer(model_name, device=device)
+def _load_embedding_model(model_name: str, device: str, hf_token: str | None) -> SentenceTransformer:
+    model = SentenceTransformer(model_name, device=device, trust_remote_code=True, token=hf_token)
     model.eval()
     return model
 

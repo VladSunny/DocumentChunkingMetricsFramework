@@ -87,6 +87,7 @@ def calculate_embeddings(
     texts: str | Sequence[str],
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     *,
+    hf_token: str | None = None,
     device: str | None = None,
     batch_size: int = 32,
 ) -> np.ndarray:
@@ -123,7 +124,7 @@ def calculate_embeddings(
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
     resolved_device = utils._resolve_device(device)
-    model = utils._load_embedding_model(model_name.strip(), resolved_device)
+    model = utils._load_embedding_model(model_name.strip(), resolved_device, hf_token)
     utils._warn_about_embedding_truncation(text_items, model)
     encode_input = texts if isinstance(texts, str) else text_items
     return np.asarray(
