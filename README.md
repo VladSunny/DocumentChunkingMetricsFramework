@@ -165,6 +165,10 @@ scores_by_chunk = intrachunk_cohesion(embeddings_by_chunk)
 print(scores_by_chunk)
 ```
 
+In interactive notebooks, keep `device` and `hf_token` consistent across related local embedding
+calls so they reuse the same cached model instance. If you intentionally switch embedding models or
+devices mid-session, call `local.clear_embedding_model_cache()` before loading the next one.
+
 Model helpers may download their default Hugging Face models on first use. The
 [practical usage guide](docs/usage-examples.md) covers model selection, API configuration, every
 callable, custom prompts, and complete SC/ICC/DCC/BC/ChunkScore/HOPE pipelines.
@@ -200,8 +204,9 @@ from chunking_metrics import metrics, preparations, prompts
 | Signature | Purpose |
 | --- | --- |
 | `calculate_perplexity(text: str, model_name: str = DEFAULT_PERPLEXITY_MODEL, *, context: str \| None = None, device: str \| None = None) -> float` | Calculate target perplexity, optionally conditioned on preceding text |
-| `calculate_embeddings(texts: str \| Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, device: str \| None = None, batch_size: int = 32) -> np.ndarray` | Encode one text or a sequence as normalized embeddings |
-| `retrieve_relevant_chunks(queries: Sequence[str], candidate_chunks: Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, top_k: int = 3, device: str \| None = None, batch_size: int = 32) -> list[list[str]]` | Rank candidate chunks independently for each query |
+| `calculate_embeddings(texts: str \| Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, hf_token: str \| None = None, device: str \| None = None, batch_size: int = 32) -> np.ndarray` | Encode one text or a sequence as normalized embeddings |
+| `retrieve_relevant_chunks(queries: Sequence[str], candidate_chunks: Sequence[str], model_name: str = DEFAULT_EMBEDDING_MODEL, *, top_k: int = 3, device: str \| None = None, batch_size: int = 32, hf_token: str \| None = None) -> list[list[str]]` | Rank candidate chunks independently for each query |
+| `clear_embedding_model_cache(*, model_name: str \| None = None, device: str \| None = None) -> int` | Remove cached local embedding models, optionally filtered by model and/or device |
 | `generate_answers(questions: Sequence[str], chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, additional_chunks_by_question: Sequence[Sequence[str]] \| None = None, prompt: str = DEFAULT_ANSWER_PROMPT, temperature: float = 0.0, max_new_tokens: int = 128, device: str \| None = None, max_regenerations: int = 0) -> list[str]` | Answer questions with a local causal chat model |
 | `generate_statements(chunk: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_STATEMENT_PROMPT, statement_count: int = 5, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None, max_regenerations: int = 0) -> list[str]` | Generate statements with a local causal chat model |
 | `generate_information_preservation_statements(segment: str, model_name: str = DEFAULT_STATEMENT_MODEL, *, prompt: str = DEFAULT_INFORMATION_PRESERVATION_PROMPT, temperature: float = 0.7, max_new_tokens: int = 256, device: str \| None = None, max_regenerations: int = 0) -> tuple[str, list[str]]` | Generate one true and three false statements with a local causal chat model |

@@ -98,6 +98,7 @@ def calculate_embeddings(
         texts: A text or sequence of texts to embed. Texts must contain non-whitespace
             characters.
         model_name: Hugging Face Sentence Transformers model identifier or local model path.
+        hf_token: Optional Hugging Face token used if the model must be downloaded.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override. When omitted,
             CUDA is preferred, followed by MPS and CPU.
         batch_size: Number of texts encoded in one inference batch.
@@ -110,7 +111,10 @@ def calculate_embeddings(
         ValueError: If an argument is empty or ``batch_size`` is not positive.
 
     Texts longer than the model's maximum sequence length are truncated by Sentence
-    Transformers after this function emits a warning.
+    Transformers after this function emits a warning. In notebook-style sessions, keep
+    ``device`` and ``hf_token`` consistent across related calls so they reuse the same
+    cached model instance, and call ``clear_embedding_model_cache()`` before intentionally
+    switching models or devices.
     """
     text_items = [texts] if isinstance(texts, str) else list(texts)
     if not text_items:
@@ -157,6 +161,7 @@ def retrieve_relevant_chunks(
         candidate_chunks: Non-empty chunks to rank independently for every query.
         model_name: Hugging Face Sentence Transformers model identifier or local model path.
         top_k: Maximum number of chunks returned per query.
+        hf_token: Optional Hugging Face token used if the embedding model must be downloaded.
         device: Optional ``cpu``, ``cuda[:index]``, or ``mps`` override.
         batch_size: Number of texts encoded in one inference batch.
 
@@ -170,7 +175,10 @@ def retrieve_relevant_chunks(
 
     Query and candidate embeddings are calculated together in one model call. Callers are
     responsible for excluding a primary chunk when HOPE Semantic Independence requires retrieval
-    only from the other chunks in the document.
+    only from the other chunks in the document. In notebook-style sessions, keep ``device``
+    and ``hf_token`` consistent across related calls so they reuse the same cached model
+    instance, and call ``clear_embedding_model_cache()`` before intentionally switching
+    models or devices.
     """
     if not isinstance(top_k, int) or isinstance(top_k, bool):
         raise TypeError("top_k must be an integer")
@@ -202,3 +210,25 @@ def retrieve_relevant_chunks(
     retrieved_count = min(top_k, len(candidate_items))
     ranked_indices = np.argsort(-similarities, axis=1, kind="stable")[:, :retrieved_count]
     return [[candidate_items[index] for index in query_indices] for query_indices in ranked_indices]
+
+
+def clear_embedding_model_cache(
+    *,
+    model_name: str | None = None,
+    device: str | None = None,
+) -> int:
+    """Clear cached local embedding models.
+
+    Args:
+        model_name: Optional model filter. When provided, only matching cached models
+            are removed.
+        device: Optional device filter. When provided, only matching cached models are
+            removed.
+
+    Returns:
+        The number of cached embedding models removed.
+
+    When at least one removed model was cached on CUDA, ``torch.cuda.empty_cache()`` is
+    called once after removal so interactive sessions can reclaim VRAM promptly.
+    """
+    return utils._clear_embedding_model_cache(model_name=model_name, device=device)

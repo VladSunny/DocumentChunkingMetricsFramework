@@ -4,6 +4,7 @@ from .calculation import (
     DEFAULT_PERPLEXITY_MODEL,
     calculate_embeddings,
     calculate_perplexity,
+    clear_embedding_model_cache,
     retrieve_relevant_chunks,
 )
 from .generation import (
@@ -21,6 +22,7 @@ __all__ = [
     "DEFAULT_STATEMENT_MODEL",
     "calculate_embeddings",
     "calculate_perplexity",
+    "clear_embedding_model_cache",
     "calculation",
     "evaluate_information_preservation",
     "generate_answers",

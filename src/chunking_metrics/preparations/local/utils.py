@@ -1,6 +1,7 @@
 import json
 import math
 import warnings
+import gc
 from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any, TypeVar
@@ -13,6 +14,24 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 _IGNORED_LABEL = -100
 _UNBOUNDED_MODEL_LENGTH = 1_000_000
 _Response = TypeVar("_Response", bound=BaseModel)
+_EMBEDDING_MODEL_CACHE: dict[tuple[str, str], SentenceTransformer] = {}
+
+
+def _normalize_model_name(model_name: str) -> str:
+    cleaned = model_name.strip()
+    if not cleaned:
+        raise ValueError("model_name must not be empty")
+    return cleaned
+
+
+def _normalize_device_label(device: str) -> str:
+    try:
+        normalized_device = torch.device(device.strip())
+    except (RuntimeError, TypeError) as error:
+        raise ValueError(f"invalid device: {device!r}") from error
+    if normalized_device.type not in {"cpu", "cuda", "mps"}:
+        raise ValueError("device must be cpu, cuda, or mps")
+    return str(normalized_device)
 
 
 def _resolve_device(device: str | None) -> str:
@@ -23,13 +42,7 @@ def _resolve_device(device: str | None) -> str:
             return "mps"
         return "cpu"
 
-    try:
-        resolved_device = torch.device(device)
-    except (RuntimeError, TypeError) as error:
-        raise ValueError(f"invalid device: {device!r}") from error
-
-    if resolved_device.type not in {"cpu", "cuda", "mps"}:
-        raise ValueError("device must be cpu, cuda, or mps")
+    resolved_device = torch.device(_normalize_device_label(device))
     if resolved_device.type == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA is not available")
     if resolved_device.type == "mps" and not torch.backends.mps.is_available():
@@ -62,11 +75,55 @@ def _load_model_and_tokenizer(model_name: str, hf_token: str | None, device: str
     return tokenizer, model, _model_max_length(tokenizer, model)
 
 
-@lru_cache(maxsize=1)
 def _load_embedding_model(model_name: str, device: str, hf_token: str | None) -> SentenceTransformer:
-    model = SentenceTransformer(model_name, device=device, trust_remote_code=True, token=hf_token)
+    cache_key = (_normalize_model_name(model_name), _normalize_device_label(device))
+    cached_model = _EMBEDDING_MODEL_CACHE.get(cache_key)
+    if cached_model is not None:
+        return cached_model
+
+    model = SentenceTransformer(
+        cache_key[0],
+        device=cache_key[1],
+        trust_remote_code=True,
+        token=hf_token,
+    )
     model.eval()
+    _EMBEDDING_MODEL_CACHE[cache_key] = model
     return model
+
+
+def _clear_embedding_model_cache(
+    *,
+    model_name: str | None = None,
+    device: str | None = None,
+) -> int:
+    normalized_model_name = _normalize_model_name(model_name) if model_name is not None else None
+    normalized_device = _normalize_device_label(device) if device is not None else None
+
+    keys_to_remove = [
+        key
+        for key in _EMBEDDING_MODEL_CACHE
+        if (normalized_model_name is None or key[0] == normalized_model_name)
+        and (normalized_device is None or key[1] == normalized_device)
+    ]
+    removed_models = [_EMBEDDING_MODEL_CACHE.pop(key) for key in keys_to_remove]
+    removed_cuda_entry = any(key[1].startswith("cuda") for key in keys_to_remove)
+    if removed_cuda_entry:
+        for model in removed_models:
+            move_to_cpu = getattr(model, "to", None)
+            if callable(move_to_cpu):
+                move_to_cpu("cpu")
+        gc.collect()
+    if removed_cuda_entry:
+        torch.cuda.empty_cache()
+    return len(keys_to_remove)
+
+
+def _load_embedding_model_cache_clear() -> None:
+    _clear_embedding_model_cache()
+
+
+_load_embedding_model.cache_clear = _load_embedding_model_cache_clear  # type: ignore[attr-defined]
 
 
 def _warn_about_embedding_truncation(texts: list[str], model: Any) -> None:

@@ -2565,6 +2565,175 @@ def test_embedding_model_loader_caches_model_and_enables_eval(
     local_utils._load_embedding_model.cache_clear()
 
 
+def test_embedding_model_loader_reuses_cached_model_across_hf_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = FakeEmbeddingModel()
+    loads: list[tuple[str, str, str | None]] = []
+
+    def load_model(
+        model_name: str,
+        *,
+        device: str,
+        trust_remote_code: bool,
+        token: str | None,
+    ) -> FakeEmbeddingModel:
+        assert trust_remote_code is True
+        loads.append((model_name, device, token))
+        return model
+
+    monkeypatch.setattr(local_utils, "SentenceTransformer", load_model, raising=False)
+    local.clear_embedding_model_cache()
+
+    first = local_utils._load_embedding_model("model", "cpu", "secret")
+    second = local_utils._load_embedding_model("model", "cpu", None)
+
+    assert first is second
+    assert loads == [("model", "cpu", "secret")]
+    local.clear_embedding_model_cache()
+
+
+def test_embedding_model_loader_caches_distinct_models_per_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loads: list[tuple[str, str, str | None]] = []
+
+    def load_model(
+        model_name: str,
+        *,
+        device: str,
+        trust_remote_code: bool,
+        token: str | None,
+    ) -> FakeEmbeddingModel:
+        assert trust_remote_code is True
+        loads.append((model_name, device, token))
+        return FakeEmbeddingModel()
+
+    monkeypatch.setattr(local_utils, "SentenceTransformer", load_model, raising=False)
+    local.clear_embedding_model_cache()
+
+    cpu_model = local_utils._load_embedding_model("model", "cpu", "secret")
+    cuda_model = local_utils._load_embedding_model("model", "cuda", None)
+
+    assert cpu_model is not cuda_model
+    assert loads == [("model", "cpu", "secret"), ("model", "cuda", None)]
+    local.clear_embedding_model_cache()
+
+
+def test_clear_embedding_model_cache_clears_all_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pytest.fail("must not clear CUDA cache"))
+    local_utils._EMBEDDING_MODEL_CACHE.clear()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-a", "cpu")] = FakeEmbeddingModel()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-b", "mps")] = FakeEmbeddingModel()
+
+    removed = local.clear_embedding_model_cache()
+
+    assert removed == 2
+    assert local_utils._EMBEDDING_MODEL_CACHE == {}
+
+
+def test_clear_embedding_model_cache_filters_by_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pytest.fail("must not clear CUDA cache"))
+    local_utils._EMBEDDING_MODEL_CACHE.clear()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-a", "cpu")] = FakeEmbeddingModel()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-b", "cpu")] = FakeEmbeddingModel()
+
+    removed = local.clear_embedding_model_cache(model_name=" model-a ")
+
+    assert removed == 1
+    assert set(local_utils._EMBEDDING_MODEL_CACHE) == {("model-b", "cpu")}
+
+
+def test_clear_embedding_model_cache_filters_by_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_cache_calls = 0
+
+    def empty_cache() -> None:
+        nonlocal empty_cache_calls
+        empty_cache_calls += 1
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._EMBEDDING_MODEL_CACHE.clear()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-a", "cpu")] = FakeEmbeddingModel()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-b", "cuda:1")] = FakeEmbeddingModel()
+
+    removed = local.clear_embedding_model_cache(device=" cuda:1 ")
+
+    assert removed == 1
+    assert empty_cache_calls == 1
+    assert set(local_utils._EMBEDDING_MODEL_CACHE) == {("model-a", "cpu")}
+
+
+def test_clear_embedding_model_cache_empties_cuda_cache_once_when_cuda_entries_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_cache_calls = 0
+
+    def empty_cache() -> None:
+        nonlocal empty_cache_calls
+        empty_cache_calls += 1
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._EMBEDDING_MODEL_CACHE.clear()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-a", "cuda")] = FakeEmbeddingModel()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-b", "cuda:1")] = FakeEmbeddingModel()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-c", "cpu")] = FakeEmbeddingModel()
+
+    removed = local.clear_embedding_model_cache(device="cuda")
+
+    assert removed == 1
+    assert empty_cache_calls == 1
+    assert set(local_utils._EMBEDDING_MODEL_CACHE) == {("model-b", "cuda:1"), ("model-c", "cpu")}
+
+
+def test_clear_embedding_model_cache_moves_cuda_models_off_device_before_emptying_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class GpuEmbeddingModel(FakeEmbeddingModel):
+        def to(self, device: str) -> "GpuEmbeddingModel":
+            events.append(f"to:{device}")
+            return self
+
+    def empty_cache() -> None:
+        events.append("empty_cache")
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._EMBEDDING_MODEL_CACHE.clear()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-a", "cuda")] = GpuEmbeddingModel()
+
+    removed = local.clear_embedding_model_cache()
+
+    assert removed == 1
+    assert events == ["to:cpu", "empty_cache"]
+    assert local_utils._EMBEDDING_MODEL_CACHE == {}
+
+
+def test_clear_embedding_model_cache_does_not_empty_cuda_cache_for_cpu_only_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_cache_calls = 0
+
+    def empty_cache() -> None:
+        nonlocal empty_cache_calls
+        empty_cache_calls += 1
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._EMBEDDING_MODEL_CACHE.clear()
+    local_utils._EMBEDDING_MODEL_CACHE[("model-a", "cpu")] = FakeEmbeddingModel()
+
+    removed = local.clear_embedding_model_cache()
+
+    assert removed == 1
+    assert empty_cache_calls == 0
+
+
 def test_calculate_embeddings_rejects_empty_text_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2681,6 +2850,7 @@ def test_retrieve_relevant_chunks_ranks_candidates_for_each_query(
         model_name="model",
         device="cpu",
         batch_size=4,
+        hf_token="secret",
     )
 
     assert result == [
@@ -2693,7 +2863,7 @@ def test_retrieve_relevant_chunks_ranks_candidates_for_each_query(
             "model",
             "cpu",
             4,
-            None,
+            "secret",
         )
     ]
 
