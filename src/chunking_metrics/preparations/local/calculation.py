@@ -14,6 +14,7 @@ def calculate_perplexity(
     text: str,
     model_name: str = DEFAULT_PERPLEXITY_MODEL,
     *,
+    hf_token: str | None = None,
     context: str | None = None,
     device: str | None = None,
 ) -> float:
@@ -42,7 +43,7 @@ def calculate_perplexity(
         raise ValueError("model_name must not be empty")
     resolved_device = utils._resolve_device(device)
     tokenizer, model, max_length = utils._load_model_and_tokenizer(
-        model_name.strip(), resolved_device
+        model_name.strip(), hf_token, resolved_device
     )
 
     target_text = f" {text.lstrip()}"

@@ -54,9 +54,9 @@ def _model_max_length(tokenizer: Any, model: Any) -> int:
 
 
 @lru_cache(maxsize=1)
-def _load_model_and_tokenizer(model_name: str, device: str) -> tuple[Any, Any, int]:
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+def _load_model_and_tokenizer(model_name: str, hf_token: str | None, device: str) -> tuple[Any, Any, int]:
+    tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
+    model = AutoModelForCausalLM.from_pretrained(model_name, token=hf_token)
     model = model.to(device)
     model.eval()
     return tokenizer, model, _model_max_length(tokenizer, model)
@@ -108,6 +108,7 @@ def _generate_text(
     messages: list[dict[str, str]],
     model_name: str,
     *,
+    hf_token: str | None = None,
     temperature: float,
     max_new_tokens: int,
     device: str | None,
@@ -115,7 +116,7 @@ def _generate_text(
     context_window_error: str,
 ) -> str:
     resolved_device = _resolve_device(device)
-    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), resolved_device)
+    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), hf_token, resolved_device)
     try:
         model_inputs = tokenizer.apply_chat_template(
             messages,
