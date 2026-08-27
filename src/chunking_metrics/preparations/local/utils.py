@@ -1,9 +1,9 @@
+import gc
 import json
 import math
 import warnings
-import gc
 from collections.abc import Sequence
-from functools import lru_cache
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 import torch
@@ -15,6 +15,17 @@ _IGNORED_LABEL = -100
 _UNBOUNDED_MODEL_LENGTH = 1_000_000
 _Response = TypeVar("_Response", bound=BaseModel)
 _EMBEDDING_MODEL_CACHE: dict[tuple[str, str], SentenceTransformer] = {}
+
+
+@dataclass
+class _CausalModelCacheEntry:
+    model_name: str
+    hf_token: str | None
+    device: str
+    loaded: tuple[Any, Any, int]
+
+
+_CAUSAL_MODEL_CACHE: _CausalModelCacheEntry | None = None
 
 
 def _normalize_model_name(model_name: str) -> str:
@@ -66,16 +77,40 @@ def _model_max_length(tokenizer: Any, model: Any) -> int:
     return min(finite_lengths)
 
 
-@lru_cache(maxsize=1)
-def _load_model_and_tokenizer(model_name: str, hf_token: str | None, device: str) -> tuple[Any, Any, int]:
-    tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
-    model = AutoModelForCausalLM.from_pretrained(model_name, token=hf_token)
-    model = model.to(device)
+def _load_model_and_tokenizer(
+    model_name: str,
+    hf_token: str | None,
+    device: str,
+) -> tuple[Any, Any, int]:
+    global _CAUSAL_MODEL_CACHE
+    normalized_model_name = _normalize_model_name(model_name)
+    normalized_device = _normalize_device_label(device)
+    cached_entry = _CAUSAL_MODEL_CACHE
+    if (
+        cached_entry is not None
+        and cached_entry.model_name == normalized_model_name
+        and cached_entry.hf_token == hf_token
+        and cached_entry.device == normalized_device
+    ):
+        return cached_entry.loaded
+
+    tokenizer = AutoTokenizer.from_pretrained(normalized_model_name, token=hf_token)
+    model = AutoModelForCausalLM.from_pretrained(normalized_model_name, token=hf_token)
+    model = model.to(normalized_device)
     model.eval()
-    return tokenizer, model, _model_max_length(tokenizer, model)
+    loaded = (tokenizer, model, _model_max_length(tokenizer, model))
+    _CAUSAL_MODEL_CACHE = _CausalModelCacheEntry(
+        model_name=normalized_model_name,
+        hf_token=hf_token,
+        device=normalized_device,
+        loaded=loaded,
+    )
+    return loaded
 
 
-def _load_embedding_model(model_name: str, device: str, hf_token: str | None) -> SentenceTransformer:
+def _load_embedding_model(
+    model_name: str, device: str, hf_token: str | None
+) -> SentenceTransformer:
     cache_key = (_normalize_model_name(model_name), _normalize_device_label(device))
     cached_model = _EMBEDDING_MODEL_CACHE.get(cache_key)
     if cached_model is not None:
@@ -119,11 +154,44 @@ def _clear_embedding_model_cache(
     return len(keys_to_remove)
 
 
+def _clear_causal_model_cache(
+    *,
+    model_name: str | None = None,
+    device: str | None = None,
+) -> int:
+    global _CAUSAL_MODEL_CACHE
+    normalized_model_name = _normalize_model_name(model_name) if model_name is not None else None
+    normalized_device = _normalize_device_label(device) if device is not None else None
+    cached_entry = _CAUSAL_MODEL_CACHE
+    if cached_entry is None:
+        return 0
+    if normalized_model_name is not None and cached_entry.model_name != normalized_model_name:
+        return 0
+    if normalized_device is not None and cached_entry.device != normalized_device:
+        return 0
+
+    _CAUSAL_MODEL_CACHE = None
+    if cached_entry.device.startswith("cuda"):
+        move_to_cpu = getattr(cached_entry.loaded[1], "to", None)
+        if callable(move_to_cpu):
+            move_to_cpu("cpu")
+        gc.collect()
+        torch.cuda.empty_cache()
+    return 1
+
+
 def _load_embedding_model_cache_clear() -> None:
     _clear_embedding_model_cache()
 
 
 _load_embedding_model.cache_clear = _load_embedding_model_cache_clear  # type: ignore[attr-defined]
+
+
+def _load_model_and_tokenizer_cache_clear() -> None:
+    _clear_causal_model_cache()
+
+
+_load_model_and_tokenizer.cache_clear = _load_model_and_tokenizer_cache_clear  # type: ignore[attr-defined]
 
 
 def _warn_about_embedding_truncation(texts: list[str], model: Any) -> None:
@@ -173,7 +241,9 @@ def _generate_text(
     context_window_error: str,
 ) -> str:
     resolved_device = _resolve_device(device)
-    tokenizer, model, max_length = _load_model_and_tokenizer(model_name.strip(), hf_token, resolved_device)
+    tokenizer, model, max_length = _load_model_and_tokenizer(
+        model_name.strip(), hf_token, resolved_device
+    )
     try:
         model_inputs = tokenizer.apply_chat_template(
             messages,

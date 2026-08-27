@@ -36,6 +36,9 @@ def calculate_perplexity(
 
     The boundary between context and target is normalized to one space. If the combined
     sequence is too long, the oldest context tokens are discarded and a warning is emitted.
+    In notebook-style sessions, keep ``device`` and ``hf_token`` consistent across related
+    calls so they reuse the same cached causal model instance, and call
+    ``clear_causal_model_cache()`` before intentionally switching models or devices.
     """
     if not text.strip():
         raise ValueError("text must not be empty")
@@ -232,3 +235,27 @@ def clear_embedding_model_cache(
     called once after removal so interactive sessions can reclaim VRAM promptly.
     """
     return utils._clear_embedding_model_cache(model_name=model_name, device=device)
+
+
+def clear_causal_model_cache(
+    *,
+    model_name: str | None = None,
+    device: str | None = None,
+) -> int:
+    """Clear the cached local causal language model.
+
+    Args:
+        model_name: Optional model filter. When provided, the cached entry is removed
+            only if it matches this normalized model name.
+        device: Optional device filter. When provided, the cached entry is removed only
+            if it matches this normalized device.
+
+    Returns:
+        The number of cached causal-model entries removed.
+
+    Because local causal-model loading retains at most one cached entry, the return value
+    is always ``0`` or ``1``. When a removed entry was cached on CUDA,
+    ``torch.cuda.empty_cache()`` is called after moving the model to CPU and collecting
+    garbage so interactive sessions can reclaim VRAM promptly.
+    """
+    return utils._clear_causal_model_cache(model_name=model_name, device=device)

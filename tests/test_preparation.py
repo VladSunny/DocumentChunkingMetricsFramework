@@ -737,7 +737,8 @@ def test_local_generation_functions_forward_hf_token_to_generate_text(
         calls.append({"messages": messages, "model_name": model_name, **kwargs})
         if function_name == "generate_information_preservation_statements":
             return (
-                '{"true_statement":" True. ","false_statements":[" False 1. ","False 2.","False 3."]}'
+                '{"true_statement":" True. ","false_statements":'
+                '[" False 1. ","False 2.","False 3."]}'
             )
         if function_name == "evaluate_information_preservation":
             return '{"selected_index": 1}'
@@ -3113,3 +3114,160 @@ def test_model_loader_caches_last_model(monkeypatch: pytest.MonkeyPatch) -> None
     assert model.loaded_device == "cpu"
     assert model.is_eval
     local_utils._load_model_and_tokenizer.cache_clear()
+
+
+def test_model_loader_treats_distinct_hf_tokens_as_distinct_cache_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer_loads = 0
+    model_loads = 0
+
+    def load_tokenizer(model_name: str, *, token: str | None) -> FakeTokenizer:
+        nonlocal tokenizer_loads
+        tokenizer_loads += 1
+        return FakeTokenizer(model_max_length=64)
+
+    def load_model(model_name: str, *, token: str | None) -> FakeModel:
+        nonlocal model_loads
+        model_loads += 1
+        return FakeModel(max_position_embeddings=32)
+
+    monkeypatch.setattr(local_utils.AutoTokenizer, "from_pretrained", load_tokenizer)
+    monkeypatch.setattr(local_utils.AutoModelForCausalLM, "from_pretrained", load_model)
+    local_utils._load_model_and_tokenizer.cache_clear()
+
+    first = local_utils._load_model_and_tokenizer("model", "hf-secret-a", "cpu")
+    second = local_utils._load_model_and_tokenizer("model", "hf-secret-b", "cpu")
+
+    assert first is not second
+    assert tokenizer_loads == 2
+    assert model_loads == 2
+    local_utils._load_model_and_tokenizer.cache_clear()
+
+
+def test_clear_causal_model_cache_clears_cached_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pytest.fail("must not clear CUDA cache"))
+    local_utils._CAUSAL_MODEL_CACHE = local_utils._CausalModelCacheEntry(
+        model_name="model-a",
+        hf_token="hf-secret",
+        device="cpu",
+        loaded=(FakeTokenizer(model_max_length=64), FakeModel(max_position_embeddings=32), 32),
+    )
+
+    removed = local.clear_causal_model_cache()
+
+    assert removed == 1
+    assert local_utils._CAUSAL_MODEL_CACHE is None
+
+
+def test_clear_causal_model_cache_filters_by_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pytest.fail("must not clear CUDA cache"))
+    local_utils._CAUSAL_MODEL_CACHE = local_utils._CausalModelCacheEntry(
+        model_name="model-a",
+        hf_token="hf-secret",
+        device="cpu",
+        loaded=(FakeTokenizer(model_max_length=64), FakeModel(max_position_embeddings=32), 32),
+    )
+
+    removed = local.clear_causal_model_cache(model_name=" model-a ")
+
+    assert removed == 1
+    assert local_utils._CAUSAL_MODEL_CACHE is None
+
+
+def test_clear_causal_model_cache_filters_by_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_cache_calls = 0
+
+    def empty_cache() -> None:
+        nonlocal empty_cache_calls
+        empty_cache_calls += 1
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._CAUSAL_MODEL_CACHE = local_utils._CausalModelCacheEntry(
+        model_name="model-a",
+        hf_token="hf-secret",
+        device="cuda:1",
+        loaded=(FakeTokenizer(model_max_length=64), FakeModel(max_position_embeddings=32), 32),
+    )
+
+    removed = local.clear_causal_model_cache(device=" cuda:1 ")
+
+    assert removed == 1
+    assert empty_cache_calls == 1
+    assert local_utils._CAUSAL_MODEL_CACHE is None
+
+
+def test_clear_causal_model_cache_noops_when_filters_do_not_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pytest.fail("must not clear CUDA cache"))
+    cached_entry = local_utils._CausalModelCacheEntry(
+        model_name="model-a",
+        hf_token="hf-secret",
+        device="cpu",
+        loaded=(FakeTokenizer(model_max_length=64), FakeModel(max_position_embeddings=32), 32),
+    )
+    local_utils._CAUSAL_MODEL_CACHE = cached_entry
+
+    removed = local.clear_causal_model_cache(model_name="model-b")
+
+    assert removed == 0
+    assert local_utils._CAUSAL_MODEL_CACHE is cached_entry
+
+
+def test_clear_causal_model_cache_moves_cuda_model_before_emptying_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class GpuCausalModel(FakeModel):
+        def to(self, device: str) -> "GpuCausalModel":
+            events.append(f"to:{device}")
+            return super().to(device)
+
+    def empty_cache() -> None:
+        events.append("empty_cache")
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._CAUSAL_MODEL_CACHE = local_utils._CausalModelCacheEntry(
+        model_name="model-a",
+        hf_token="hf-secret",
+        device="cuda",
+        loaded=(FakeTokenizer(model_max_length=64), GpuCausalModel(max_position_embeddings=32), 32),
+    )
+
+    removed = local.clear_causal_model_cache()
+
+    assert removed == 1
+    assert events == ["to:cpu", "empty_cache"]
+    assert local_utils._CAUSAL_MODEL_CACHE is None
+
+
+def test_clear_causal_model_cache_does_not_empty_cuda_cache_for_cpu_only_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_cache_calls = 0
+
+    def empty_cache() -> None:
+        nonlocal empty_cache_calls
+        empty_cache_calls += 1
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+    local_utils._CAUSAL_MODEL_CACHE = local_utils._CausalModelCacheEntry(
+        model_name="model-a",
+        hf_token="hf-secret",
+        device="cpu",
+        loaded=(FakeTokenizer(model_max_length=64), FakeModel(max_position_embeddings=32), 32),
+    )
+
+    removed = local.clear_causal_model_cache()
+
+    assert removed == 1
+    assert empty_cache_calls == 0
+    assert local_utils._CAUSAL_MODEL_CACHE is None

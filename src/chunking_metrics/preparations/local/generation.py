@@ -42,6 +42,10 @@ def generate_answers(
 
     Args:
         hf_token: Optional Hugging Face token used when loading gated local models.
+
+    In notebook-style sessions, keep ``device`` and ``hf_token`` consistent across
+    related calls so they reuse the same cached causal model instance, and call
+    ``clear_causal_model_cache()`` before intentionally switching models or devices.
     """
     utils._validate_max_regenerations(max_regenerations)
     question_items, additional_chunk_items = utils._validate_answer_inputs(
@@ -103,6 +107,10 @@ def generate_statements(
 
     Args:
         hf_token: Optional Hugging Face token used when loading gated local models.
+
+    In notebook-style sessions, keep ``device`` and ``hf_token`` consistent across
+    related calls so they reuse the same cached causal model instance, and call
+    ``clear_causal_model_cache()`` before intentionally switching models or devices.
     """
     utils._validate_max_regenerations(max_regenerations)
     utils._validate_list_generation_inputs(
@@ -156,6 +164,10 @@ def generate_information_preservation_statements(
 
     Args:
         hf_token: Optional Hugging Face token used when loading gated local models.
+
+    In notebook-style sessions, keep ``device`` and ``hf_token`` consistent across
+    related calls so they reuse the same cached causal model instance, and call
+    ``clear_causal_model_cache()`` before intentionally switching models or devices.
     """
     utils._validate_max_regenerations(max_regenerations)
     utils._require_non_empty(segment, "segment")
@@ -211,6 +223,10 @@ def evaluate_information_preservation(
 
     Args:
         hf_token: Optional Hugging Face token used when loading gated local models.
+
+    In notebook-style sessions, keep ``device`` and ``hf_token`` consistent across
+    related calls so they reuse the same cached causal model instance, and call
+    ``clear_causal_model_cache()`` before intentionally switching models or devices.
     """
     utils._validate_max_regenerations(max_regenerations)
     true_item, false_items, chunk_items = utils._validate_evaluation_inputs(
@@ -275,6 +291,10 @@ def generate_questions(
 
     Args:
         hf_token: Optional Hugging Face token used when loading gated local models.
+
+    In notebook-style sessions, keep ``device`` and ``hf_token`` consistent across
+    related calls so they reuse the same cached causal model instance, and call
+    ``clear_causal_model_cache()`` before intentionally switching models or devices.
     """
     utils._validate_max_regenerations(max_regenerations)
     utils._validate_list_generation_inputs(

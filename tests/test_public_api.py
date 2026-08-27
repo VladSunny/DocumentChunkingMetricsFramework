@@ -5,8 +5,11 @@ from chunking_metrics.metrics import chunk_score, semantic_dispersion, size_comp
 from chunking_metrics.preparations import api, local
 from chunking_metrics.preparations.api import calculation as api_calculation
 from chunking_metrics.preparations.api import generation as api_generation
-from chunking_metrics.preparations.local import calculate_embeddings
-from chunking_metrics.preparations.local import clear_embedding_model_cache
+from chunking_metrics.preparations.local import (
+    calculate_embeddings,
+    clear_causal_model_cache,
+    clear_embedding_model_cache,
+)
 from chunking_metrics.preparations.local import calculation as local_calculation
 from chunking_metrics.preparations.local import generation as local_generation
 from chunking_metrics.prompts import DEFAULT_QUESTION_PROMPT
@@ -21,11 +24,13 @@ def test_public_api_is_grouped_by_module() -> None:
     assert chunking_metrics.preparations.local is local
     assert chunking_metrics.preparations.api is api
     assert local.calculate_embeddings is calculate_embeddings
+    assert local.clear_causal_model_cache is clear_causal_model_cache
     assert local.clear_embedding_model_cache is clear_embedding_model_cache
     assert local.calculation is local_calculation
     assert local.generation is local_generation
     assert local.calculate_embeddings is local_calculation.calculate_embeddings
     assert local.calculate_perplexity is local_calculation.calculate_perplexity
+    assert local.clear_causal_model_cache is local_calculation.clear_causal_model_cache
     assert local.clear_embedding_model_cache is local_calculation.clear_embedding_model_cache
     assert local.retrieve_relevant_chunks is local_calculation.retrieve_relevant_chunks
     assert local.generate_answers is local_generation.generate_answers
