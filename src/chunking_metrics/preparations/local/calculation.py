@@ -148,6 +148,7 @@ def retrieve_relevant_chunks(
     top_k: int = 3,
     device: str | None = None,
     batch_size: int = 32,
+    hf_token: str | None = None,
 ) -> list[list[str]]:
     """Retrieve the most relevant candidate chunks for each query using embeddings.
 
@@ -193,6 +194,7 @@ def retrieve_relevant_chunks(
     embeddings = calculate_embeddings(
         [*query_items, *candidate_items],
         model_name,
+        hf_token=hf_token,
         device=device,
         batch_size=batch_size,
     )
