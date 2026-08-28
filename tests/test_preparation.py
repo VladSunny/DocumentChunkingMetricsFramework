@@ -37,6 +37,7 @@ class FakeModel:
         self.loss = loss
         self.input_ids: list[int] | None = None
         self.labels: list[int] | None = None
+        self.call_kwargs: dict[str, Any] | None = None
         self.loaded_device: str | None = None
         self.is_eval = False
 
@@ -49,6 +50,7 @@ class FakeModel:
         return self
 
     def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        self.call_kwargs = kwargs
         self.input_ids = kwargs["input_ids"].tolist()[0]
         self.labels = kwargs["labels"].tolist()[0]
         return SimpleNamespace(loss=torch.tensor(self.loss))
@@ -2966,6 +2968,17 @@ def test_calculate_perplexity_forwards_hf_token_to_model_loader(
     assert calls == [("model", "hf-secret", "cpu")]
 
 
+def test_calculate_perplexity_disables_kv_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = install_fake_components(monkeypatch)
+
+    calculate_perplexity("text", device="cpu")
+
+    assert model.call_kwargs is not None
+    assert model.call_kwargs["use_cache"] is False
+
+
 def test_calculate_embeddings_forwards_hf_token_to_embedding_loader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3113,6 +3126,87 @@ def test_model_loader_caches_last_model(monkeypatch: pytest.MonkeyPatch) -> None
     assert model_loads == 1
     assert model.loaded_device == "cpu"
     assert model.is_eval
+    local_utils._load_model_and_tokenizer.cache_clear()
+
+
+def test_model_loader_uses_bfloat16_on_supported_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeTokenizer(model_max_length=64)
+    model = FakeModel(max_position_embeddings=32)
+    tokenizer_calls: list[dict[str, object]] = []
+    model_calls: list[dict[str, object]] = []
+
+    def load_tokenizer(model_name: str, *, token: str | None) -> FakeTokenizer:
+        tokenizer_calls.append({"model_name": model_name, "token": token})
+        return tokenizer
+
+    def load_model(model_name: str, *, token: str | None, torch_dtype: object) -> FakeModel:
+        model_calls.append(
+            {
+                "model_name": model_name,
+                "token": token,
+                "torch_dtype": torch_dtype,
+            }
+        )
+        return model
+
+    monkeypatch.setattr(local_utils.AutoTokenizer, "from_pretrained", load_tokenizer)
+    monkeypatch.setattr(local_utils.AutoModelForCausalLM, "from_pretrained", load_model)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    local_utils._load_model_and_tokenizer.cache_clear()
+
+    loaded = local_utils._load_model_and_tokenizer("model", "hf-secret", "cuda")
+
+    assert loaded[2] == 32
+    assert tokenizer_calls == [{"model_name": "model", "token": "hf-secret"}]
+    assert model_calls == [
+        {
+            "model_name": "model",
+            "token": "hf-secret",
+            "torch_dtype": torch.bfloat16,
+        }
+    ]
+    assert model.loaded_device == "cuda"
+    local_utils._load_model_and_tokenizer.cache_clear()
+
+
+def test_model_loader_uses_float16_when_bfloat16_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = FakeTokenizer(model_max_length=64)
+    model = FakeModel(max_position_embeddings=32)
+    model_calls: list[dict[str, object]] = []
+
+    def load_tokenizer(model_name: str, *, token: str | None) -> FakeTokenizer:
+        return tokenizer
+
+    def load_model(model_name: str, *, token: str | None, torch_dtype: object) -> FakeModel:
+        model_calls.append(
+            {
+                "model_name": model_name,
+                "token": token,
+                "torch_dtype": torch_dtype,
+            }
+        )
+        return model
+
+    monkeypatch.setattr(local_utils.AutoTokenizer, "from_pretrained", load_tokenizer)
+    monkeypatch.setattr(local_utils.AutoModelForCausalLM, "from_pretrained", load_model)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    local_utils._load_model_and_tokenizer.cache_clear()
+
+    loaded = local_utils._load_model_and_tokenizer("model", "hf-secret", "cuda:1")
+
+    assert loaded[2] == 32
+    assert model_calls == [
+        {
+            "model_name": "model",
+            "token": "hf-secret",
+            "torch_dtype": torch.float16,
+        }
+    ]
+    assert model.loaded_device == "cuda:1"
     local_utils._load_model_and_tokenizer.cache_clear()
 
 

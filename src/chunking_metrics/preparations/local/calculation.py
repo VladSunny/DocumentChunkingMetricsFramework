@@ -81,10 +81,12 @@ def calculate_perplexity(
     label_tensor = torch.tensor([labels], dtype=torch.long, device=resolved_device)
 
     with torch.inference_mode():
-        output = model(input_ids=input_tensor, labels=label_tensor)
+        output = model(input_ids=input_tensor, labels=label_tensor, use_cache=False)
     if output.loss is None:
         raise ValueError("the causal language model did not return a loss")
-    return float(torch.exp(output.loss.detach()).cpu().item())
+    result = float(torch.exp(output.loss.detach()).cpu().item())
+    del input_tensor, label_tensor, output
+    return result
 
 
 def calculate_embeddings(

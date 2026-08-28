@@ -95,7 +95,12 @@ def _load_model_and_tokenizer(
         return cached_entry.loaded
 
     tokenizer = AutoTokenizer.from_pretrained(normalized_model_name, token=hf_token)
-    model = AutoModelForCausalLM.from_pretrained(normalized_model_name, token=hf_token)
+    causal_model_kwargs: dict[str, Any] = {"token": hf_token}
+    if normalized_device.startswith("cuda"):
+        causal_model_kwargs["torch_dtype"] = (
+            torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        )
+    model = AutoModelForCausalLM.from_pretrained(normalized_model_name, **causal_model_kwargs)
     model = model.to(normalized_device)
     model.eval()
     loaded = (tokenizer, model, _model_max_length(tokenizer, model))
